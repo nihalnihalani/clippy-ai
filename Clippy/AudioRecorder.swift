@@ -57,12 +57,21 @@ class AudioRecorder: NSObject, ObservableObject {
     }
     
     func stopRecording() -> URL? {
-        guard let recorder = audioRecorder, isRecording else { return nil }
+        guard let recorder = audioRecorder, isRecording else { 
+            print("⚠️ [AudioRecorder] stopRecording called but not recording")
+            return nil 
+        }
         
         recorder.stop()
         isRecording = false
-        print("🛑 [AudioRecorder] Stopped recording")
-        return recorder.url
+        let url = recorder.url
+        
+        // Verify file was created and has content
+        let path = url.path
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
+        print("🛑 [AudioRecorder] Stopped recording. File size: \(fileSize) bytes at \(path)")
+        
+        return url
     }
 }
 

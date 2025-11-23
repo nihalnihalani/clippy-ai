@@ -59,6 +59,10 @@ class HotkeyManager: ObservableObject {
                 }
                 
                 // Check for Option+S (legacy suggestions - kept for compatibility)
+                // S key code is 1.
+                // We need to be careful not to swallow valid shortcuts if other modifiers are pressed.
+                // But here we only check for .maskAlternate (Option key).
+                
                 if event.flags.contains(.maskAlternate) && event.getIntegerValueField(.keyboardEventKeycode) == 1 { // 1 = S
                     print("⌨️ [HotkeyManager] Option+S detected!")
                     DispatchQueue.main.async {

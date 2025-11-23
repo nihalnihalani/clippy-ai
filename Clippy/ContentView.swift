@@ -157,66 +157,89 @@ struct ContentView: View {
         )
     }
     
-    private func toggleVoiceRecording() {
-        if isRecordingVoice {
-            // STOP Recording & Process
-            isRecordingVoice = false
-            floatingDogController.setState(.thinking) // Dog looks like it's thinking
-            
-            guard let url = audioRecorder.stopRecording() else { return }
-            guard let service = elevenLabsService else {
-                floatingDogController.updateMessage("ElevenLabs API Key missing! 🔑")
-                return
-            }
-            
-            Task {
-                do {
-                    // 1. Transcribe via ElevenLabs
-                    let text = try await service.transcribe(audioFileURL: url)
-                    
-                    // 2. Feed into existing logic (same as typing)
-                    if !text.isEmpty {
-                        processCapturedText(text)
-                    } else {
-                        floatingDogController.updateMessage("I didn't catch that 👂")
-                    }
-                } catch {
-                    print("Voice Error: \(error.localizedDescription)")
-                    floatingDogController.updateMessage("Couldn't hear you 🙉")
-                }
-            }
-        } else {
-            // START Recording
-            // Check if service is available before starting
-            if elevenLabsService == nil {
-                floatingDogController.updateMessage("Set ElevenLabs API Key in Settings ⚙️")
-                return
-            }
-            
-            isRecordingVoice = true
-            _ = audioRecorder.startRecording()
-            floatingDogController.setState(.idle, message: "Listening... 🎙️")
-        }
+    // MARK: - Logic Handlers
+
+    
+    // MARK: - Input Mode Management
+    
+    enum InputMode {
+        case none
+        case textCapture // Option+X
+        case voiceCapture // Option+Space
+        case visionCapture // Option+V
+        case legacySuggestions // Option+S
     }
     
-    // MARK: - Logic Handlers
+    @State private var activeInputMode: InputMode = .none
+    
+    private func resetInputState() {
+        // Cancel text capture
+        if textCaptureService.isCapturing {
+            textCaptureService.stopCapturing()
+        }
+        
+        // Cancel voice recording
+        if isRecordingVoice {
+            isRecordingVoice = false
+            _ = audioRecorder.stopRecording()
+        }
+        
+        // Reset UI state
+        if activeInputMode != .none {
+            // Only hide if we were actually doing something
+            floatingDogController.hide()
+        }
+        
+        activeInputMode = .none
+        isProcessingAnswer = false
+        thinkingStartTime = nil
+    }
     
     private func handleHotkeyTrigger() {
-        print("\n🔥 [ContentView] Hotkey triggered (Option+X)")
-        // Managed by TextCaptureService now
+        print("\n🔥 [ContentView] Hotkey triggered (Option+S)")
+        
+        if activeInputMode == .legacySuggestions {
+            // Toggle off
+            resetInputState()
+        } else {
+            // Switch to legacy mode
+            resetInputState()
+            activeInputMode = .legacySuggestions
+            // Implement legacy behavior if needed
+        }
     }
     
     private func handleVisionHotkeyTrigger() {
         print("\n👁️ [ContentView] Vision hotkey triggered (Option+V)")
+        
+        // Vision is a one-shot action, but we should still reset other modes
+        resetInputState()
+        activeInputMode = .visionCapture
+        
+        floatingDogController.setState(.thinking, message: "Analyzing screen... 👁️")
+        
         visionParser.parseCurrentScreen { result in
-            switch result {
-            case .success(let parsedContent):
-                print("✅ Vision parsing successful!")
-                if !parsedContent.fullText.isEmpty {
-                    saveVisionContent(parsedContent.fullText)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let parsedContent):
+                    print("✅ Vision parsing successful!")
+                    if !parsedContent.fullText.isEmpty {
+                        self.saveVisionContent(parsedContent.fullText)
+                        self.floatingDogController.setState(.done)
+                    } else {
+                        self.floatingDogController.updateMessage("Nothing found to read 👀")
+                    }
+                case .failure(let error):
+                    print("❌ Vision parsing failed: \(error.localizedDescription)")
+                    self.floatingDogController.updateMessage("Vision failed 😵")
                 }
-            case .failure(let error):
-                print("❌ Vision parsing failed: \(error.localizedDescription)")
+                
+                // Reset mode after short delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    if self.activeInputMode == .visionCapture {
+                        self.activeInputMode = .none
+                    }
+                }
             }
         }
     }
@@ -235,13 +258,22 @@ struct ContentView: View {
     private func handleTextCaptureTrigger() {
         print("\n⌨️ [ContentView] Text capture hotkey triggered (Option+X)")
         
-        if textCaptureService.isCapturing {
+        if activeInputMode == .textCapture {
             // Second press: Stop capturing and start thinking
-            floatingDogController.setState(.thinking)
-            thinkingStartTime = Date() // Record when thinking started
-            textCaptureService.stopCapturing()
+            if textCaptureService.isCapturing {
+                floatingDogController.setState(.thinking)
+                thinkingStartTime = Date() // Record when thinking started
+                textCaptureService.stopCapturing()
+                // Processing happens in onComplete callback
+            } else {
+                // Should not happen if state is consistent, but safe fallback
+                resetInputState()
+            }
         } else {
-            // First press: Start capturing with idle state
+            // Switch to text capture mode
+            resetInputState()
+            activeInputMode = .textCapture
+            
             floatingDogController.setState(.idle)
             textCaptureService.startCapturing(
                 onTypingDetected: {
@@ -329,11 +361,99 @@ struct ContentView: View {
                     self.floatingDogController.updateMessage("That's not an image 🤔", isLoading: false)
                 }
             } else if let answer = answer?.trimmingCharacters(in: .whitespacesAndNewlines), !answer.isEmpty {
-                self.textCaptureService.replaceCapturedTextWithAnswer(answer)
-                self.floatingDogController.updateMessage("Answer ready! 🎉", isLoading: false)
+                // Handle based on input mode
+                if self.activeInputMode == .textCapture {
+                    // For text capture: replace captured text with answer
+                    self.textCaptureService.replaceCapturedTextWithAnswer(answer)
+                    self.floatingDogController.updateMessage("Answer ready! 🎉", isLoading: false)
+                } else if self.activeInputMode == .voiceCapture {
+                    // For voice: insert answer at current cursor position
+                    self.textCaptureService.insertTextAtCursor(answer)
+                    self.floatingDogController.updateMessage("Answer ready! 🎉", isLoading: false)
+                } else {
+                    // Fallback: insert at cursor
+                    self.textCaptureService.insertTextAtCursor(answer)
+                    self.floatingDogController.updateMessage("Answer ready! 🎉", isLoading: false)
+                }
             } else {
                 self.floatingDogController.updateMessage("Question not relevant to clipboard 📋", isLoading: false)
             }
+            
+            // Reset input mode after processing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                // Only reset if still in the same mode (user hasn't started something else)
+                if self.activeInputMode == .textCapture || self.activeInputMode == .voiceCapture {
+                    self.activeInputMode = .none
+                }
+            }
+        }
+    }
+    
+    private func toggleVoiceRecording() {
+        print("\n🎙️ [ContentView] Voice capture hotkey triggered (Option+Space)")
+        
+        if activeInputMode == .voiceCapture {
+            // Second press: Stop Recording & Process
+            if isRecordingVoice {
+                isRecordingVoice = false
+                floatingDogController.setState(.thinking) // Dog looks like it's thinking
+                
+                guard let url = audioRecorder.stopRecording() else { 
+                    resetInputState()
+                    return 
+                }
+                
+                guard let service = elevenLabsService else {
+                    floatingDogController.updateMessage("ElevenLabs API Key missing! 🔑")
+                    // Don't reset state immediately so user sees message
+                    return
+                }
+                
+                Task {
+                    do {
+                        // 1. Transcribe via ElevenLabs
+                        let text = try await service.transcribe(audioFileURL: url)
+                        
+                        // 2. Feed into existing logic (same as typing)
+                        await MainActor.run {
+                            if !text.isEmpty {
+                                self.processCapturedText(text)
+                            } else {
+                                self.floatingDogController.updateMessage("I didn't catch that 👂")
+                                self.activeInputMode = .none
+                            }
+                        }
+                    } catch {
+                        await MainActor.run {
+                            print("Voice Error: \(error.localizedDescription)")
+                            self.floatingDogController.updateMessage("Couldn't hear you 🙉")
+                            self.activeInputMode = .none
+                        }
+                    }
+                }
+            } else {
+                resetInputState()
+            }
+        } else {
+            // Switch to Voice Capture Mode
+            resetInputState()
+            activeInputMode = .voiceCapture
+            
+            // Check if service is available before starting
+            if elevenLabsService == nil {
+                floatingDogController.updateMessage("Set ElevenLabs API Key in Settings ⚙️")
+                // Reset mode after delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    if self.activeInputMode == .voiceCapture {
+                        self.resetInputState()
+                    }
+                }
+                return
+            }
+            
+            isRecordingVoice = true
+            _ = audioRecorder.startRecording()
+            floatingDogController.setState(.idle, message: "Listening... 🎙️")
         }
     }
     

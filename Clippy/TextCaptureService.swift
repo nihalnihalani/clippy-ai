@@ -213,6 +213,25 @@ class TextCaptureService: ObservableObject {
         }
     }
     
+    /// Insert text into the current cursor position (for voice input or direct insertion)
+    func insertTextAtCursor(_ answer: String) {
+        print("🔄 [TextCaptureService] Inserting text at cursor position (voice mode)...")
+        print("   Answer: \(answer.prefix(100))...")
+        
+        let src = CGEventSource(stateID: .hidSystemState)
+        
+        // Try the instant bulk CGEvent method first (Fluid Dictation's primary method)
+        if insertTextBulkInstant(answer, using: src) {
+            print("✅ [TextCaptureService] Text inserted via Fluid Dictation CGEvent method")
+            return
+        }
+        
+        print("⚠️ [TextCaptureService] CGEvent insertion failed, falling back to character-by-character")
+        // Fallback to character-by-character typing (Fluid Dictation's fallback)
+        typeTextCharByChar(answer, using: src)
+        print("✅ [TextCaptureService] Text insertion complete")
+    }
+    
     private func replaceTextUsingAccessibility(_ text: String, for application: NSRunningApplication) -> Bool {
         guard AXIsProcessTrusted() else {
             print("⚠️ [TextCaptureService] Accessibility permission not granted; cannot insert text directly")
