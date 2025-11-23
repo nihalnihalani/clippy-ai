@@ -15,6 +15,7 @@
 ### Smart Clipboard Management with Context-Aware Intelligence
 
 [![GitHub Repo](https://img.shields.io/badge/View_on-GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/yhinai/clippy)
+[![Website](https://img.shields.io/badge/Visit-Website-00C7B7?style=for-the-badge&logo=vercel&logoColor=white)](https://clippy-website.vercel.app)
 [![Watch Demo](https://img.shields.io/badge/Watch-Demo_Video-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/G7C_tThwl9s)
 
 ![Clippy Demo](https://img.shields.io/badge/📎-Meet_Your_Smart_Assistant-4A90E2?style=for-the-badge)
