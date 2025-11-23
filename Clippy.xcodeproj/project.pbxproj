@@ -22,8 +22,6 @@
 		7CD28AE22E98EB620075A000 /* Corgi.png in Resources */ = {isa = PBXBuildFile; fileRef = 7CD28AD32E98EB620075A000 /* Corgi.png */; };
 		7CD28AE32E98EB620075A000 /* README.txt in Resources */ = {isa = PBXBuildFile; fileRef = 7CD28AD82E98EB620075A000 /* README.txt */; };
 		7CD28AE42E98EB620075A000 /* Husky.png in Resources */ = {isa = PBXBuildFile; fileRef = 7CD28AD52E98EB620075A000 /* Husky.png */; };
-		7CD28AE62E98F1E90075A000 /* CuteDog.mov in Resources */ = {isa = PBXBuildFile; fileRef = 7CD28AE52E98F1E90075A000 /* CuteDog.mov */; };
-		7CD28AE82E98FA790075A000 /* CuteDog.gif in Resources */ = {isa = PBXBuildFile; fileRef = 7CD28AE72E98FA790075A000 /* CuteDog.gif */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,8 +39,6 @@
 		7CD28AD52E98EB620075A000 /* Husky.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Husky.png; sourceTree = "<group>"; };
 		7CD28AD62E98EB620075A000 /* Labrador.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Labrador.png; sourceTree = "<group>"; };
 		7CD28AD82E98EB620075A000 /* README.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = README.txt; sourceTree = "<group>"; };
-		7CD28AE52E98F1E90075A000 /* CuteDog.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; path = CuteDog.mov; sourceTree = "<group>"; };
-		7CD28AE72E98FA790075A000 /* CuteDog.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = CuteDog.gif; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -69,7 +65,7 @@
 		7C1ADD0D2E962B920014E10D = {
 			isa = PBXGroup;
 			children = (
-				7CD28AE52E98F1E90075A000 /* CuteDog.mov */,
+				7CD28AE62E98F1E90075A000 /* CuteDog.mov */,
 				7C1ADD182E962B920014E10D /* Clippy */,
 				7C1ADD172E962B920014E10D /* Products */,
 				7CD28AE72E98FA790075A000 /* CuteDog.gif */,
@@ -192,8 +188,6 @@
 			files = (
 				7CD28AF02E9900000075A000 /* map.png in Resources */,
 				7CD28AF12E9900000075A000 /* agent.js in Resources */,
-				7CD28AF22E9900000075A000 /* ClippyGifs in Resources */,
-				7CD28AE82E98FA790075A000 /* CuteDog.gif in Resources */,
 				7CD28AE62E98F1E90075A000 /* CuteDog.mov in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
