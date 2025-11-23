@@ -60,7 +60,7 @@ func analyzeImage(imagePath: String, apiKey: String) async throws -> String {
             ]
         ],
         "generationConfig": [
-            "maxOutputTokens": 500
+            "maxOutputTokens": 8192
         ]
     ]
     

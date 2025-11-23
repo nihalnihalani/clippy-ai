@@ -197,7 +197,8 @@ class GeminiService: ObservableObject {
                 ]
             ],
             "generationConfig": [
-                "response_mime_type": "application/json"
+                "response_mime_type": "application/json",
+                "maxOutputTokens": 8192
             ]
         ]
         
@@ -294,7 +295,8 @@ class GeminiService: ObservableObject {
                 ]
             ],
             "generationConfig": [
-                "response_mime_type": "application/json"
+                "response_mime_type": "application/json",
+                "maxOutputTokens": 8192
             ]
         ]
         
@@ -391,7 +393,7 @@ class GeminiService: ObservableObject {
                 ]
             ],
             "generationConfig": [
-                "maxOutputTokens": 500
+                "maxOutputTokens": 8192
             ]
         ]
         

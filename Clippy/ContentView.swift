@@ -297,10 +297,26 @@ struct ContentView: View {
     }
     
     private func getStoredAPIKey() -> String {
-        // Prioritize environment/file keys for dev, fallback to UserDefaults
+        // 1. Check process environment
         if let envKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"], !envKey.isEmpty { return envKey }
-        // Check .env file logic omitted for brevity but can be re-added if critical
-        return UserDefaults.standard.string(forKey: "Gemini_API_Key") ?? "AIzaSyAyt9Fpkr6RhxAgtdU1_N1MdgJgtpqqiR8"
+        
+        // 2. Check UserDefaults
+        if let stored = UserDefaults.standard.string(forKey: "Gemini_API_Key"), !stored.isEmpty {
+            return stored
+        }
+        
+        // 3. Check local .env file manually (Fallback for development)
+        let envPath = URL(fileURLWithPath: #file).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(".env")
+        if let content = try? String(contentsOf: envPath, encoding: .utf8) {
+            let lines = content.components(separatedBy: .newlines)
+            for line in lines {
+                if line.starts(with: "GEMINI_API_KEY=") {
+                    return line.replacingOccurrences(of: "GEMINI_API_KEY=", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+        
+        return ""
     }
 }
 
