@@ -216,26 +216,39 @@ struct ContentView: View {
         resetInputState()
         activeInputMode = .visionCapture
         
-        floatingDogController.setState(.thinking, message: "Analyzing screen... 👁️")
+        floatingDogController.setState(.thinking, message: "Capturing screen... 📸")
         
         visionParser.parseCurrentScreen { result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let parsedContent):
                     print("✅ Vision parsing successful!")
+                    print("   Extracted \(parsedContent.fullText.count) characters")
                     if !parsedContent.fullText.isEmpty {
                         self.saveVisionContent(parsedContent.fullText)
-                        self.floatingDogController.setState(.done)
+                        self.floatingDogController.setState(.done, message: "Saved \(parsedContent.fullText.count) chars! ✅")
                     } else {
-                        self.floatingDogController.updateMessage("Nothing found to read 👀")
+                        self.floatingDogController.setState(.error, message: "No text found 👀")
                     }
                 case .failure(let error):
                     print("❌ Vision parsing failed: \(error.localizedDescription)")
-                    self.floatingDogController.updateMessage("Vision failed 😵")
+                    
+                    // Check if it's a permission error
+                    if case VisionParserError.screenCaptureFailed = error {
+                        self.floatingDogController.setState(.error, message: "Need Screen Recording permission 🔐")
+                        // Open System Settings
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    } else {
+                        self.floatingDogController.setState(.error, message: "Vision failed: \(error.localizedDescription)")
+                    }
                 }
                 
                 // Reset mode after short delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     if self.activeInputMode == .visionCapture {
                         self.activeInputMode = .none
                     }

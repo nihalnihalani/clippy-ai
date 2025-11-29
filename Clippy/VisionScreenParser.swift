@@ -115,87 +115,95 @@ class VisionScreenParser: ObservableObject {
     // MARK: - Screen Capture
     
     private func captureScreen() -> NSImage? {
-        guard let screen = NSScreen.main else {
+        guard NSScreen.main != nil else {
             DispatchQueue.main.async {
                 self.debugOutput += "\n❌ Failed to get main screen"
             }
             return nil
         }
         
-        let screenRect = screen.frame
+        DispatchQueue.main.async {
+            self.debugOutput += "\n🔍 Capturing screen using ScreenCaptureKit..."
+        }
         
-        // Use ScreenCaptureKit for modern screen capture (macOS 12.3+)
+        // Use ScreenCaptureKit for macOS 12.3+
         if #available(macOS 12.3, *) {
-            return captureScreenWithScreenCaptureKit(screenRect: screenRect)
+            return captureWithScreenCaptureKit()
         } else {
-            // Fallback to deprecated API for older systems
-            // TODO: Implement proper ScreenCaptureKit when available
-            return createScreenImageLegacy(screenRect: screenRect)
+            DispatchQueue.main.async {
+                self.debugOutput += "\n❌ ScreenCaptureKit requires macOS 12.3+"
+            }
+            return nil
         }
     }
     
     @available(macOS 12.3, *)
-    private func captureScreenWithScreenCaptureKit(screenRect: CGRect) -> NSImage? {
-        DispatchQueue.main.async {
-            self.debugOutput += "\n🔍 Attempting ScreenCaptureKit screen capture..."
-            self.debugOutput += "\n⚠️ ScreenCaptureKit implementation pending - using fallback"
-        }
+    private func captureWithScreenCaptureKit() -> NSImage? {
+        var resultImage: NSImage?
+        let semaphore = DispatchSemaphore(value: 0)
         
-        // For now, return nil and fall back to legacy method
-        // ScreenCaptureKit requires more complex streaming setup with delegates
-        // This is a placeholder for future implementation
-        return nil
-    }
-    
-    private func createScreenImageLegacy(screenRect: CGRect) -> NSImage? {
-        DispatchQueue.main.async {
-            self.debugOutput += "\n🔍 Creating test image for Vision parsing"
-        }
-        
-        // Create a test image with some text for Vision to parse
-        let size = NSSize(width: screenRect.width, height: screenRect.height)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        
-        // Draw a white background
-        NSColor.white.setFill()
-        NSRect(origin: .zero, size: size).fill()
-        
-        // Add some sample text for Vision to recognize
-        let sampleTexts = [
-            "Document Title",
-            "This is a sample document for Vision parsing.",
-            "Paragraph 1: Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
-            "Paragraph 2: Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
-            "List Item 1",
-            "List Item 2", 
-            "List Item 3",
-            "Footer: End of document"
-        ]
-        
-        let attributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: NSColor.black,
-            .font: NSFont.systemFont(ofSize: 16)
-        ]
-        
-        var yPosition: CGFloat = size.height - 50
-        
-        for (index, text) in sampleTexts.enumerated() {
-            let fontSize: CGFloat = index == 0 ? 24 : 16 // Title is larger
-            let textAttributes = attributes.merging([.font: NSFont.systemFont(ofSize: fontSize)]) { _, new in new }
+        Task {
+            do {
+                // Get available content (screens and windows)
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                
+                guard let display = content.displays.first else {
+                    DispatchQueue.main.async {
+                        self.debugOutput += "\n❌ No displays available"
+                    }
+                    semaphore.signal()
+                    return
+                }
+                
+                // Create filter to capture the entire display
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                
+                // Configure capture settings
+                let config = SCStreamConfiguration()
+                config.width = Int(display.width * 2) // Retina
+                config.height = Int(display.height * 2)
+                config.showsCursor = false
+                config.capturesAudio = false
+                
+                // Capture single screenshot
+                let cgImage = try await SCScreenshotManager.captureImage(
+                    contentFilter: filter,
+                    configuration: config
+                )
+                
+                DispatchQueue.main.async {
+                    self.debugOutput += "\n✅ Screen captured: \(cgImage.width)x\(cgImage.height) pixels"
+                }
+                
+                resultImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                
+            } catch {
+                DispatchQueue.main.async {
+                    self.debugOutput += "\n❌ ScreenCaptureKit error: \(error.localizedDescription)"
+                    
+                    // Check for permission error
+                    if (error as NSError).code == -3801 || error.localizedDescription.contains("permission") {
+                        self.debugOutput += "\n🔐 Please grant Screen Recording permission in System Settings"
+                        // Open System Settings
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+            }
             
-            let attributedString = NSAttributedString(string: text, attributes: textAttributes)
-            attributedString.draw(at: NSPoint(x: 50, y: yPosition))
-            
-            yPosition -= fontSize + 10
+            semaphore.signal()
         }
         
-        image.unlockFocus()
-        
-        DispatchQueue.main.async {
-            self.debugOutput += "\n✅ Test image created successfully"
+        // Wait for capture to complete (with timeout)
+        let result = semaphore.wait(timeout: .now() + 10.0)
+        if result == .timedOut {
+            DispatchQueue.main.async {
+                self.debugOutput += "\n❌ Screen capture timed out"
+            }
         }
-        return image
+        
+        return resultImage
     }
     
     // MARK: - Vision Processing
