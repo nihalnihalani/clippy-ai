@@ -1,7 +1,7 @@
 # Technical Report: Clippy
 
 ## 1. Executive Summary
-Clippy (formerly PastePup) is a macOS clipboard manager leveraging local and cloud AI to provide intelligent context-aware suggestions and semantic search. It uses `SwiftData` for persistence, `VecturaKit` for embeddings, and Accessibility APIs for context gathering.
+Clippy is a macOS clipboard manager leveraging local and cloud AI to provide intelligent context-aware suggestions and semantic search. It uses `SwiftData` for persistence, `VecturaKit` for embeddings, and Accessibility APIs for context gathering.
 
 ## 2. System Architecture
 
@@ -11,16 +11,18 @@ Clippy (formerly PastePup) is a macOS clipboard manager leveraging local and clo
 - **AI Services**:
   - `GeminiService`: Interfaces with Google's Gemini API for semantic tagging and question answering (Gemini 2.5 Flash).
   - `LocalAIService`: Interfaces with a local LLM (e.g., Qwen via local endpoint) for privacy-focused operations.
+  - `ElevenLabsService`: Handles voice-to-text transcription for voice input.
+  - `OpenAIService`: Alternative cloud AI service (GPT-4.1/GPT-5).
 - **SuggestionEngine**: Ranks clipboard items based on vector similarity (embeddings), recency, and frequency.
 - **UI Layer (SwiftUI)**: `ContentView` is the main interface. `FloatingDogWindowController` manages the "Clippy-like" floating assistant.
 
 ### Data Flow
-1.  **Capture**: `ClipboardMonitor` detects changes -> Captures content -> Captures Context (AX).
-2.  **Process**: Content is passed to `GeminiService` or `LocalAIService` for tagging.
-3.  **Store**: `Item` is saved to `SwiftData`. Embeddings are generated and stored via `EmbeddingService`.
-4.  **Retrieval**: User query -> `SuggestionEngine` searches embeddings -> Returns ranked `Item` list.
+1. **Capture**: `ClipboardMonitor` detects changes -> Captures content -> Captures Context (AX).
+2. **Process**: Content is passed to `GeminiService` or `LocalAIService` for tagging.
+3. **Store**: `Item` is saved to `SwiftData`. Embeddings are generated and stored via `EmbeddingService`.
+4. **Retrieval**: User query -> `SuggestionEngine` searches embeddings -> Returns ranked `Item` list.
 
-## 3. Build Analysis (Post-Refactor)
+## 3. Build Configuration
 - **Project File**: `Clippy.xcodeproj`
 - **Targets**: `Clippy` (macOS App)
 - **Bundle Identifier**: `altic.Clippy`
@@ -31,18 +33,22 @@ Clippy (formerly PastePup) is a macOS clipboard manager leveraging local and clo
   - Minimum Deployment Target: macOS 15.0
   - Swift Version: 5.0
 
-## 4. Refactor Execution (PastePup → Clippy)
+## 4. Keyboard Shortcuts
+- **Option+X**: Text capture mode - type a question, press again to submit
+- **Option+Space**: Voice capture mode - speak a question, press again to submit
+- **Option+V**: Vision/OCR mode - captures and parses on-screen text
+- **Option+S**: Legacy suggestions mode
 
-### Changes Implemented
-- **Project Name**: Renamed `PastePup.xcodeproj` to `Clippy.xcodeproj`.
-- **Bundle ID**: Updated to `altic.Clippy`.
-- **Root Directory**: Renamed `PastePup/` to `Clippy/`.
-- **Main App File**: Renamed `PastePupApp.swift` to `ClippyApp.swift` and updated the `@main` struct to `ClippyApp`.
-- **UI Strings**: All user-facing text (e.g., "PastePup is listening...") now reads "Clippy...".
-- **Configuration**: `Info.plist` and `project.pbxproj` updated to reflect new paths and names.
-
-### Verification
-A verification script (`scripts/verify_integrity.py`) was executed to ensure:
-1.  No "PastePup" strings remain in source code or filenames.
-2.  Critical project settings (Product Name, Bundle ID) match the new "Clippy" identity.
-3.  The file structure is consistent with the Xcode project references.
+## 5. Key Files
+| File | Purpose |
+|------|---------|
+| `ContentView.swift` | Main UI and hotkey orchestration |
+| `ClipboardMonitor.swift` | Clipboard change detection |
+| `GeminiService.swift` | Google Gemini AI integration |
+| `LocalAIService.swift` | Local LLM integration |
+| `ElevenLabsService.swift` | Voice transcription |
+| `TextCaptureService.swift` | Text input capture and injection |
+| `VisionScreenParser.swift` | Screen OCR using Vision framework |
+| `FloatingDogWindowController.swift` | Animated assistant overlay |
+| `SuggestionEngine.swift` | Clipboard item ranking |
+| `EmbeddingService.swift` | Vector embeddings (currently disabled) |

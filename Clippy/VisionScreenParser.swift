@@ -562,18 +562,4 @@ extension VisionScreenParser {
         }
     }
     
-    /// Method to parse specific region of screen (future enhancement)
-    func parseScreenRegion(_ rect: CGRect, completion: @escaping (Result<ParsedScreenContent, Error>) -> Void) {
-        // This would require capturing a specific region
-        // For now, we'll use the full screen and filter results
-        parseCurrentScreen { result in
-            switch result {
-            case .success(let content):
-                // Filter content by bounding box (simplified)
-                completion(.success(content))
-            case .failure(let error):
-                completion(.failure(error))
-            }
-        }
-    }
 }
