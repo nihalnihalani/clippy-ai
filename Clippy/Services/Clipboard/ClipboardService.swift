@@ -39,9 +39,9 @@ class ClipboardService {
     }
     
     @MainActor
-    func deleteItem(_ item: Item, modelContext: ModelContext, embeddingService: EmbeddingService) {
+    func deleteItem(_ item: Item, modelContext: ModelContext, clippy: Clippy) {
         if let vid = item.vectorId {
-            embeddingService.deleteDocument(vectorId: vid)
+            clippy.deleteDocument(vectorId: vid)
         }
         modelContext.delete(item)
     }

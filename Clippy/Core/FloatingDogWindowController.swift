@@ -100,12 +100,7 @@ class FloatingDogWindowController: ObservableObject {
         }
     }
     
-    @available(*, deprecated, message: "Use setState(_:message:) instead")
-    func updateMessage(_ message: String, isLoading: Bool = false) {
-        // Legacy method - convert to state-based approach
-        let state: ClippyAnimationState = isLoading ? .thinking : .idle
-        setState(state, message: message)
-    }
+
     
     private func createWindow() {
         // Create the hosting controller

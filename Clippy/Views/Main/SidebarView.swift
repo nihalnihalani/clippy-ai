@@ -21,7 +21,7 @@ struct SidebarView: View {
     @ObservedObject var floatingDogController: FloatingDogWindowController
     @Binding var showSettings: Bool
     @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject var embeddingService: EmbeddingService
+    @EnvironmentObject var clippy: Clippy
     @State private var showClearConfirmation: Bool = false
     
     var body: some View {
@@ -145,7 +145,7 @@ struct SidebarView: View {
                 
                 // Delete vector embedding if exists
                 if let vectorId = item.vectorId {
-                    embeddingService.deleteDocument(vectorId: vectorId)
+                    clippy.deleteDocument(vectorId: vectorId)
                 }
                 
                 modelContext.delete(item)

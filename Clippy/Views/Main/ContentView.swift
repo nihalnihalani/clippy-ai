@@ -18,7 +18,7 @@ enum AIServiceType: String, CaseIterable {
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var clipboardMonitor = ClipboardMonitor()
-    @StateObject private var embeddingService = EmbeddingService()
+    @StateObject private var clippy = Clippy()
     @StateObject private var hotkeyManager = HotkeyManager()
     @StateObject private var visionParser = VisionScreenParser()
     @StateObject private var textCaptureService = TextCaptureService()
@@ -76,7 +76,7 @@ struct ContentView: View {
                 }
             }
         }
-        .environmentObject(embeddingService)
+        .environmentObject(clippy)
         .sheet(isPresented: $showSettings) {
             SettingsView(
                 apiKey: Binding(
@@ -137,10 +137,10 @@ struct ContentView: View {
         }
         
         Task {
-            await embeddingService.initialize()
+            await clippy.initialize()
             clipboardMonitor.startMonitoring(
                 modelContext: modelContext,
-                embeddingService: embeddingService,
+                clippy: clippy,
                 geminiService: geminiService
             )
             
@@ -167,7 +167,6 @@ struct ContentView: View {
         case textCapture // Option+X
         case voiceCapture // Option+Space
         case visionCapture // Option+V
-        case legacySuggestions // Option+S
     }
     
     @State private var activeInputMode: InputMode = .none
@@ -197,16 +196,8 @@ struct ContentView: View {
     
     private func handleHotkeyTrigger() {
         print("\n🔥 [ContentView] Hotkey triggered (Option+S)")
-        
-        if activeInputMode == .legacySuggestions {
-            // Toggle off
-            resetInputState()
-        } else {
-            // Switch to legacy mode
-            resetInputState()
-            activeInputMode = .legacySuggestions
-            // Implement legacy behavior if needed
-        }
+        // Legacy suggestions removed. This hotkey is currently free or can be reassigned.
+        resetInputState()
     }
     
     private func handleVisionHotkeyTrigger() {
@@ -374,34 +365,34 @@ struct ContentView: View {
                     ClipboardService.shared.copyImageToClipboard(imagePath: imagePath)
                     
                     // Delete original item logic
-                    ClipboardService.shared.deleteItem(item, modelContext: self.modelContext, embeddingService: self.embeddingService)
+                    ClipboardService.shared.deleteItem(item, modelContext: self.modelContext, clippy: self.clippy)
                     
                     self.textCaptureService.replaceCapturedTextWithAnswer("")
                     
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         self.simulatePaste()
-                        self.floatingDogController.updateMessage("Image pasted! 🖼️", isLoading: false)
+                        self.floatingDogController.setState(.done, message: "Image pasted! 🖼️")
                     }
                 } else {
-                    self.floatingDogController.updateMessage("That's not an image 🤔", isLoading: false)
+                    self.floatingDogController.setState(.idle, message: "That's not an image 🤔")
                 }
             } else if let answer = answer?.trimmingCharacters(in: .whitespacesAndNewlines), !answer.isEmpty {
                 // Handle based on input mode
                 if self.activeInputMode == .textCapture {
                     // For text capture: replace captured text with answer
                     self.textCaptureService.replaceCapturedTextWithAnswer(answer)
-                    self.floatingDogController.updateMessage("Answer ready! 🎉", isLoading: false)
+                    self.floatingDogController.setState(.done, message: "Answer ready! 🎉")
                 } else if self.activeInputMode == .voiceCapture {
                     // For voice: insert answer at current cursor position
                     self.textCaptureService.insertTextAtCursor(answer)
-                    self.floatingDogController.updateMessage("Answer ready! 🎉", isLoading: false)
+                    self.floatingDogController.setState(.done, message: "Answer ready! 🎉")
                 } else {
                     // Fallback: insert at cursor
                     self.textCaptureService.insertTextAtCursor(answer)
-                    self.floatingDogController.updateMessage("Answer ready! 🎉", isLoading: false)
+                    self.floatingDogController.setState(.done, message: "Answer ready! 🎉")
                 }
             } else {
-                self.floatingDogController.updateMessage("Question not relevant to clipboard 📋", isLoading: false)
+                self.floatingDogController.setState(.idle, message: "Question not relevant to clipboard 📋")
             }
             
             // Reset input mode after processing
@@ -429,7 +420,7 @@ struct ContentView: View {
                 }
                 
                 guard let service = elevenLabsService else {
-                    floatingDogController.updateMessage("ElevenLabs API Key missing! 🔑")
+                    floatingDogController.setState(.error, message: "ElevenLabs API Key missing! 🔑")
                     // Don't reset state immediately so user sees message
                     return
                 }
@@ -444,14 +435,14 @@ struct ContentView: View {
                             if !text.isEmpty {
                                 self.processCapturedText(text)
                             } else {
-                                self.floatingDogController.updateMessage("I didn't catch that 👂")
+                                self.floatingDogController.setState(.idle, message: "I didn't catch that 👂")
                                 self.activeInputMode = .none
                             }
                         }
                     } catch {
                         await MainActor.run {
                             print("Voice Error: \(error.localizedDescription)")
-                            self.floatingDogController.updateMessage("Couldn't hear you 🙉")
+                            self.floatingDogController.setState(.error, message: "Couldn't hear you 🙉")
                             self.activeInputMode = .none
                         }
                     }
@@ -466,7 +457,7 @@ struct ContentView: View {
             
             // Check if service is available before starting
             if elevenLabsService == nil {
-                floatingDogController.updateMessage("Set ElevenLabs API Key in Settings ⚙️")
+                floatingDogController.setState(.idle, message: "Set ElevenLabs API Key in Settings ⚙️")
                 // Reset mode after delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     if self.activeInputMode == .voiceCapture {
@@ -501,7 +492,7 @@ struct ContentView: View {
         clipboardMonitor.stopMonitoring()
         clipboardMonitor.startMonitoring(
             modelContext: modelContext,
-            embeddingService: embeddingService,
+            clippy: clippy,
             geminiService: geminiService
         )
     }

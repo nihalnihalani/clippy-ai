@@ -5,25 +5,14 @@ import VecturaKit
 import MLXEmbedders
 
 @MainActor
-class EmbeddingService: ObservableObject {
+class Clippy: ObservableObject {
     @Published var isInitialized = false
     @Published var statusMessage = "Initializing embedding service..."
     
     private var vectorDB: VecturaMLXKit?
     
-    // MARK: - Feature Flag
-    // Set to false to disable embedding functionality (for testing/development)
-    private let isEnabled = false
-    
     func initialize() async {
-        // DISABLED: Embedding service is temporarily disabled
-        guard isEnabled else {
-            print("⏸️ [EmbeddingService] Disabled - skipping initialization")
-            statusMessage = "Disabled (not in use)"
-            return
-        }
-        
-        print("🚀 [EmbeddingService] Initializing...")
+        print("🚀 [Clippy] Initializing...")
         do {
             let config = VecturaConfig(
                 name: "pastepup-clipboard",
@@ -37,23 +26,20 @@ class EmbeddingService: ObservableObject {
              
             isInitialized = true
             statusMessage = "Ready (Qwen3-Embedding-0.6B)"
-            print("✅ [EmbeddingService] Initialized successfully with Qwen3")
+            print("✅ [Clippy] Initialized successfully with Qwen3")
         } catch {
             statusMessage = "Failed to initialize: \(error.localizedDescription)"
-            print("❌ [EmbeddingService] Initialization error: \(error)")
+            print("❌ [Clippy] Initialization error: \(error)")
         }
     }
     
     func addDocument(vectorId: UUID, text: String) async {
-        // DISABLED: Embedding service is temporarily disabled
-        guard isEnabled else { return }
-        
         guard let vectorDB = vectorDB else { 
-            print("⚠️ [EmbeddingService] Cannot add document - vectorDB not initialized")
+            print("⚠️ [Clippy] Cannot add document - vectorDB not initialized")
             return 
         }
         
-        print("📝 [EmbeddingService] Adding document: \(text.prefix(50))...")
+        print("📝 [Clippy] Adding document: \(text.prefix(50))...")
         
         do {
             _ = try await vectorDB.addDocuments(
@@ -67,15 +53,12 @@ class EmbeddingService: ObservableObject {
     }
     
     func search(query: String, limit: Int = 10) async -> [(UUID, Float)] {
-        // DISABLED: Embedding service is temporarily disabled
-        guard isEnabled else { return [] }
-        
         guard let vectorDB = vectorDB else { 
-            print("⚠️ [EmbeddingService] Cannot search - vectorDB not initialized")
+            print("⚠️ [Clippy] Cannot search - vectorDB not initialized")
             return [] 
         }
         
-        print("🔎 [EmbeddingService] Searching for: '\(query)' (limit: \(limit))")
+        print("🔎 [Clippy] Searching for: '\(query)' (limit: \(limit))")
         
         do {
             let results = try await vectorDB.search(
@@ -97,9 +80,6 @@ class EmbeddingService: ObservableObject {
     }
     
     func deleteDocument(vectorId: UUID) {
-        // DISABLED: Embedding service is temporarily disabled
-        guard isEnabled else { return }
-        
         guard let vectorDB = vectorDB else { return }
         
         Task {

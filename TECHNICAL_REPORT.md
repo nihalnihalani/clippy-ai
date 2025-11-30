@@ -12,14 +12,14 @@ Clippy is a macOS clipboard manager leveraging local and cloud AI to provide int
   - `GeminiService`: Interfaces with Google's Gemini API for semantic tagging and question answering (Gemini 2.5 Flash).
   - `LocalAIService`: Interfaces with a local LLM (e.g., Qwen via local endpoint) for privacy-focused operations.
   - `ElevenLabsService`: Handles voice-to-text transcription for voice input.
-  - `OpenAIService`: Alternative cloud AI service (GPT-4.1/GPT-5).
+
 - **SuggestionEngine**: Ranks clipboard items based on vector similarity (embeddings), recency, and frequency.
 - **UI Layer (SwiftUI)**: `ContentView` is the main interface. `FloatingDogWindowController` manages the "Clippy-like" floating assistant.
 
 ### Data Flow
 1. **Capture**: `ClipboardMonitor` detects changes -> Captures content -> Captures Context (AX).
 2. **Process**: Content is passed to `GeminiService` or `LocalAIService` for tagging.
-3. **Store**: `Item` is saved to `SwiftData`. Embeddings are generated and stored via `EmbeddingService`.
+3. **Store**: `Item` is saved to `SwiftData`. Embeddings are generated and stored via `Clippy`.
 4. **Retrieval**: User query -> `SuggestionEngine` searches embeddings -> Returns ranked `Item` list.
 
 ## 3. Build Configuration
@@ -51,4 +51,4 @@ Clippy is a macOS clipboard manager leveraging local and cloud AI to provide int
 | `VisionScreenParser.swift` | Screen OCR using Vision framework |
 | `FloatingDogWindowController.swift` | Animated assistant overlay |
 | `SuggestionEngine.swift` | Clipboard item ranking |
-| `EmbeddingService.swift` | Vector embeddings (currently disabled) |
+| `Clippy.swift` | Vector embeddings (currently disabled) |

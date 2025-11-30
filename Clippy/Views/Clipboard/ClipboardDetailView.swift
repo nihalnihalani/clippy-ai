@@ -4,7 +4,7 @@ import SwiftData
 struct ClipboardDetailView: View {
     @Bindable var item: Item
     @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject var embeddingService: EmbeddingService
+    @EnvironmentObject var clippy: Clippy
     @State private var newTagInput: String = ""
     @State private var isEditingTags: Bool = false
     @State private var showCopiedFeedback: Bool = false
@@ -187,7 +187,7 @@ struct ClipboardDetailView: View {
     }
     
     private func deleteItem() {
-        ClipboardService.shared.deleteItem(item, modelContext: modelContext, embeddingService: embeddingService)
+        ClipboardService.shared.deleteItem(item, modelContext: modelContext, clippy: clippy)
     }
     
     private func addTag() {

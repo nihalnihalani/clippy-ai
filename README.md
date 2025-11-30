@@ -513,8 +513,8 @@ clippy/
 │   ├── TextCaptureService.swift    # AI text replacement
 │   ├── FloatingDogWindowController.swift  # Clippy UI
 │   ├── VisionScreenParser.swift    # OCR & screen analysis
-│   ├── EmbeddingService.swift      # Vector search
-│   ├── OpenAIService.swift         # Cloud AI (Gemini)
+│   ├── Clippy.swift                # Vector search (formerly EmbeddingService)
+
 │   ├── LocalAIService.swift        # Local AI (Qwen)
 │   ├── Item.swift                  # SwiftData model
 │   └── Resources/

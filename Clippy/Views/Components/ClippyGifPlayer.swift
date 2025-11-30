@@ -21,10 +21,8 @@ struct ClippyGifPlayer: NSViewRepresentable {
         // We need to find the file path.
         // Since we added ClippyGifs as a folder reference, we look inside that bundle resource.
         
-        let resourceName = "ClippyGifs/\(gifName)"
-        
-        // Try to load from Bundle
-        if let url = Bundle.main.url(forResource: resourceName, withExtension: "gif") {
+        // Try to load from Bundle (flat structure is standard for resources)
+        if let url = Bundle.main.url(forResource: gifName, withExtension: "gif") {
             if let image = NSImage(contentsOf: url) {
                 nsView.image = image
                 nsView.animates = true
@@ -32,8 +30,8 @@ struct ClippyGifPlayer: NSViewRepresentable {
                 print("❌ ClippyGifPlayer: Failed to load image from \(url)")
             }
         } else {
-            // Fallback: try direct filename if flat in bundle
-            if let url = Bundle.main.url(forResource: gifName, withExtension: "gif") {
+            // Try with ClippyGifs subdirectory (if added as folder reference)
+            if let url = Bundle.main.url(forResource: "ClippyGifs/\(gifName)", withExtension: "gif") {
                 if let image = NSImage(contentsOf: url) {
                     nsView.image = image
                     nsView.animates = true

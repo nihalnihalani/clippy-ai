@@ -32,11 +32,9 @@ struct ParsedScreenContent {
 
 class VisionScreenParser: ObservableObject {
     
-    // MARK: - Published Properties for UI Debugging
+    // MARK: - Published Properties
     @Published var isProcessing = false
     @Published var lastParsedContent: ParsedScreenContent?
-    @Published var debugOutput: String = ""
-    @Published var showDebugUI = true // Toggle for debugging
     
     // MARK: - Configuration
     private let recognitionLevel: VNRequestTextRecognitionLevel
@@ -63,7 +61,6 @@ class VisionScreenParser: ObservableObject {
             
             DispatchQueue.main.async {
                 self.isProcessing = true
-                self.debugOutput = "Starting screen capture and parsing..."
             }
             
             // Step 1: Capture screen
@@ -75,9 +72,7 @@ class VisionScreenParser: ObservableObject {
                 return
             }
             
-            DispatchQueue.main.async {
-                self.debugOutput += "\n✅ Screen captured successfully"
-            }
+
             
             // Step 2: Process with Vision framework
             self.processImageWithVision(screenImage) { [weak self] result in
@@ -99,12 +94,9 @@ class VisionScreenParser: ObservableObject {
                         )
                         
                         self.lastParsedContent = finalContent
-                        self.debugOutput += "\n✅ Parsing completed in \(String(format: "%.2f", processingTime))s"
-                        self.debugOutput += "\n📝 Extracted \(parsedContent.fullText.count) characters"
                         completion(.success(finalContent))
                         
                     case .failure(let error):
-                        self.debugOutput += "\n❌ Parsing failed: \(error.localizedDescription)"
                         completion(.failure(error))
                     }
                 }
@@ -116,23 +108,17 @@ class VisionScreenParser: ObservableObject {
     
     private func captureScreen() -> NSImage? {
         guard NSScreen.main != nil else {
-            DispatchQueue.main.async {
-                self.debugOutput += "\n❌ Failed to get main screen"
-            }
+
             return nil
         }
         
-        DispatchQueue.main.async {
-            self.debugOutput += "\n🔍 Capturing screen using ScreenCaptureKit..."
-        }
+
         
         // Use ScreenCaptureKit for macOS 12.3+
         if #available(macOS 12.3, *) {
             return captureWithScreenCaptureKit()
         } else {
-            DispatchQueue.main.async {
-                self.debugOutput += "\n❌ ScreenCaptureKit requires macOS 12.3+"
-            }
+
             return nil
         }
     }
@@ -148,9 +134,7 @@ class VisionScreenParser: ObservableObject {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 
                 guard let display = content.displays.first else {
-                    DispatchQueue.main.async {
-                        self.debugOutput += "\n❌ No displays available"
-                    }
+
                     semaphore.signal()
                     return
                 }
@@ -171,25 +155,12 @@ class VisionScreenParser: ObservableObject {
                     configuration: config
                 )
                 
-                DispatchQueue.main.async {
-                    self.debugOutput += "\n✅ Screen captured: \(cgImage.width)x\(cgImage.height) pixels"
-                }
+
                 
                 resultImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
                 
             } catch {
-                DispatchQueue.main.async {
-                    self.debugOutput += "\n❌ ScreenCaptureKit error: \(error.localizedDescription)"
-                    
-                    // Check for permission error
-                    if (error as NSError).code == -3801 || error.localizedDescription.contains("permission") {
-                        self.debugOutput += "\n🔐 Please grant Screen Recording permission in System Settings"
-                        // Open System Settings
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                }
+
             }
             
             semaphore.signal()
@@ -198,9 +169,7 @@ class VisionScreenParser: ObservableObject {
         // Wait for capture to complete (with timeout)
         let result = semaphore.wait(timeout: .now() + 10.0)
         if result == .timedOut {
-            DispatchQueue.main.async {
-                self.debugOutput += "\n❌ Screen capture timed out"
-            }
+
         }
         
         return resultImage
@@ -505,14 +474,6 @@ class VisionScreenParser: ObservableObject {
     }
     
     // MARK: - Utility Functions
-    
-    func clearDebugOutput() {
-        debugOutput = ""
-    }
-    
-    func toggleDebugUI() {
-        showDebugUI.toggle()
-    }
     
     func getLastParsedText() -> String {
         return lastParsedContent?.fullText ?? ""

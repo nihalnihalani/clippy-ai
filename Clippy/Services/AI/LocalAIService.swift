@@ -52,7 +52,11 @@ class LocalAIService: ObservableObject {
     private let endpoint: String
     private let model: String
     
-    init(endpoint: String = "http://10.0.0.138:1234/v1/chat/completions", model: String = "qwen/qwen3-4b") {
+    // Default configuration
+    private static let defaultEndpoint = "http://10.0.0.138:1234/v1/chat/completions"
+    private static let defaultModel = "qwen/qwen3-4b"
+    
+    init(endpoint: String = LocalAIService.defaultEndpoint, model: String = LocalAIService.defaultModel) {
         self.endpoint = endpoint
         self.model = model
     }

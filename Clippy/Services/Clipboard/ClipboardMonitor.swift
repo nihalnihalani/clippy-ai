@@ -16,12 +16,12 @@ class ClipboardMonitor: ObservableObject {
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     private var modelContext: ModelContext?
-    private var embeddingService: EmbeddingService?
+    private var clippy: Clippy?
     private var geminiService: GeminiService?
     
-    func startMonitoring(modelContext: ModelContext, embeddingService: EmbeddingService, geminiService: GeminiService? = nil) {
+    func startMonitoring(modelContext: ModelContext, clippy: Clippy, geminiService: GeminiService? = nil) {
         self.modelContext = modelContext
-        self.embeddingService = embeddingService
+        self.clippy = clippy
         self.geminiService = geminiService
         
         // Check accessibility permission (for context features), but do not gate clipboard monitoring on it
@@ -70,10 +70,10 @@ class ClipboardMonitor: ObservableObject {
             if accessEnabled {
                 self.permissionStatusMessage = "Accessibility permission granted!"
                 // Restart monitoring if we have model context
-                if let modelContext = self.modelContext, let embeddingService = self.embeddingService {
+                if let modelContext = self.modelContext, let clippy = self.clippy {
                     self.startMonitoring(
                         modelContext: modelContext,
-                        embeddingService: embeddingService,
+                        clippy: clippy,
                         geminiService: self.geminiService
                     )
                 }
@@ -317,8 +317,8 @@ class ClipboardMonitor: ObservableObject {
                 print("   ✅ Image item saved to database with description")
                 
                 // 5. Store embedding for semantic search
-                if let embeddingService = embeddingService {
-                    await embeddingService.addDocument(vectorId: vectorId, text: description)
+                if let clippy = clippy {
+                    await clippy.addDocument(vectorId: vectorId, text: description)
                     print("   ✅ Image embedding stored for search")
                 }
             } catch {
@@ -397,9 +397,9 @@ class ClipboardMonitor: ObservableObject {
             print("   ✅ Item saved to database with vectorId: \(vectorId)")
             
             // Store embedding asynchronously
-            if let embeddingService = embeddingService {
+            if let clippy = clippy {
                 Task {
-                    await embeddingService.addDocument(vectorId: vectorId, text: content)
+                    await clippy.addDocument(vectorId: vectorId, text: content)
                 }
             }
             
