@@ -116,8 +116,8 @@ struct ClipboardItemRow: View {
             
             VStack(alignment: .leading, spacing: 4) {
                 // Main Content Preview
-                Text(item.content)
-                    .font(.system(.body))
+                Text(item.title ?? item.content)
+                    .font(item.title != nil ? .system(.body, design: .rounded).weight(.medium) : .system(.body))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 

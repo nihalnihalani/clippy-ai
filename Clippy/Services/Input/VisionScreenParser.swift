@@ -26,6 +26,7 @@ struct ParsedScreenContent {
     let confidence: Float
     let processingTime: TimeInterval
     let timestamp: Date
+    let imageData: Data? // Added for LFM2 Vision
 }
 
 // MARK: - Vision Screen Parser
@@ -90,7 +91,8 @@ class VisionScreenParser: ObservableObject {
                             structuredContent: parsedContent.structuredContent,
                             confidence: parsedContent.confidence,
                             processingTime: processingTime,
-                            timestamp: Date()
+                            timestamp: Date(),
+                            imageData: screenImage.tiffRepresentation // Store image data
                         )
                         
                         self.lastParsedContent = finalContent
@@ -371,7 +373,8 @@ class VisionScreenParser: ObservableObject {
                 structuredContent: documentStructure,
                 confidence: averageConfidence,
                 processingTime: 0, // Will be set by caller
-                timestamp: Date()
+                timestamp: Date(),
+                imageData: nil
             )
             
             completion(.success(processedContent))
@@ -450,7 +453,8 @@ class VisionScreenParser: ObservableObject {
             structuredContent: documentStructure,
             confidence: averageConfidence,
             processingTime: 0, // Will be set by caller
-            timestamp: Date()
+            timestamp: Date(),
+            imageData: nil // No image data in this helper method
         )
     }
     

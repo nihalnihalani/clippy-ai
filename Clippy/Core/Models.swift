@@ -7,6 +7,7 @@ import SwiftData
 final class Item {
     var timestamp: Date
     var content: String
+    var title: String? // Added for structured content (e.g., Vision titles)
     var appName: String?
     var contentType: String
     var usageCount: Int
@@ -15,9 +16,10 @@ final class Item {
     var imagePath: String? // Path to saved image file (for image clipboard items)
     var isFavorite: Bool = false
     
-    init(timestamp: Date, content: String = "", appName: String? = nil, contentType: String = "text", imagePath: String? = nil, isFavorite: Bool = false) {
+    init(timestamp: Date, content: String = "", title: String? = nil, appName: String? = nil, contentType: String = "text", imagePath: String? = nil, isFavorite: Bool = false) {
         self.timestamp = timestamp
         self.content = content
+        self.title = title
         self.appName = appName
         self.contentType = contentType
         self.usageCount = 0

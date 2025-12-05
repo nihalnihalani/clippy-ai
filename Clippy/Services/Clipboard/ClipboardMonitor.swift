@@ -18,11 +18,13 @@ class ClipboardMonitor: ObservableObject {
     private var modelContext: ModelContext?
     private var clippy: Clippy?
     private var geminiService: GeminiService?
+    private var localAIService: LocalAIService?
     
-    func startMonitoring(modelContext: ModelContext, clippy: Clippy, geminiService: GeminiService? = nil) {
+    func startMonitoring(modelContext: ModelContext, clippy: Clippy, geminiService: GeminiService? = nil, localAIService: LocalAIService? = nil) {
         self.modelContext = modelContext
         self.clippy = clippy
         self.geminiService = geminiService
+        self.localAIService = localAIService
         
         // Check accessibility permission (for context features), but do not gate clipboard monitoring on it
         checkAccessibilityPermission()
@@ -74,7 +76,8 @@ class ClipboardMonitor: ObservableObject {
                     self.startMonitoring(
                         modelContext: modelContext,
                         clippy: clippy,
-                        geminiService: self.geminiService
+                        geminiService: self.geminiService,
+                        localAIService: self.localAIService
                     )
                 }
             } else {
@@ -308,16 +311,44 @@ class ClipboardMonitor: ObservableObject {
             return
         }
         
-        // 2. Analyze image with Gemini Vision (async)
+        // 2. Analyze image with AI (Gemini or Local)
         Task {
-            let description = await geminiService?.analyzeImage(imageData: pngData) ?? "[Image]"
+            var title: String? = nil
+            var description = "[Image]"
             
-            print("   📝 Image description: \(description)")
+            if let localService = localAIService {
+                print("   🧠 Using Local Vision Model...")
+                let base64Image = imageData.base64EncodedString()
+                if let localDesc = await localService.generateVisionDescription(base64Image: base64Image) {
+                    // Parse Title/Body from strict format "Title: ..."
+                    let lines = localDesc.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
+                    if let firstLine = lines.first, firstLine.hasPrefix("Title:") {
+                         let titleText = String(firstLine.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
+                         title = titleText
+                         if lines.count > 1 {
+                             description = String(lines[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+                         } else {
+                             description = titleText // Fallback if only title exists
+                         }
+                    } else {
+                         description = localDesc
+                    }
+                    print("   ✅ Local Vision parsed - Title: \(title ?? "None")")
+                } else {
+                    print("   ⚠️ Local Vision failed, falling back to default")
+                }
+            } else if let gemini = geminiService {
+                print("   ✨ Using Gemini Vision...")
+                description = await gemini.analyzeImage(imageData: pngData) ?? "[Image]"
+            }
+            
+            print("   📝 Final Image content length: \(description.count)")
             
             // 3. Create item with description as searchable content
             let newItem = Item(
                 timestamp: Date(),
                 content: description,
+                title: title,
                 appName: currentAppName.isEmpty ? nil : currentAppName,
                 contentType: "image",
                 imagePath: filename
@@ -335,7 +366,9 @@ class ClipboardMonitor: ObservableObject {
                 
                 // 5. Store embedding for semantic search
                 if let clippy = clippy {
-                    await clippy.addDocument(vectorId: vectorId, text: description)
+                    // Combine Title and Content for search embedding so both are searchable
+                    let embeddingText = title != nil ? "\(title!)\n\n\(description)" : description
+                    await clippy.addDocument(vectorId: vectorId, text: embeddingText)
                     print("   ✅ Image embedding stored for search")
                 }
             } catch {
@@ -421,20 +454,30 @@ class ClipboardMonitor: ObservableObject {
             }
             
             // Generate tags asynchronously (non-blocking)
-            if let geminiService = geminiService {
-                Task {
-                    let tags = await geminiService.generateTags(
+            Task {
+                var tags: [String] = []
+                
+                if let localService = localAIService {
+                    print("   🧠 Using Local AI for tagging...")
+                    tags = await localService.generateTags(
                         content: content,
                         appName: currentAppName.isEmpty ? nil : currentAppName,
                         context: hasAccessibilityPermission ? accessibilityContext : nil
                     )
-                    
-                    // Update item with tags
-                    if !tags.isEmpty {
-                        newItem.tags = tags
-                        try? modelContext.save()
-                        print("   🏷️  Tags stored: \(tags)")
-                    }
+                } else if let gemini = geminiService {
+                    print("   ✨ Using Gemini for tagging...")
+                    tags = await gemini.generateTags(
+                        content: content,
+                        appName: currentAppName.isEmpty ? nil : currentAppName,
+                        context: hasAccessibilityPermission ? accessibilityContext : nil
+                    )
+                }
+                
+                // Update item with tags
+                if !tags.isEmpty {
+                    newItem.tags = tags
+                    try? modelContext.save()
+                    print("   🏷️  Tags stored: \(tags)")
                 }
             }
         } catch {

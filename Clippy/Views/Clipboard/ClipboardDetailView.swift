@@ -14,7 +14,7 @@ struct ClipboardDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 // Header / Title
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(item.content)
+                    Text(item.title ?? item.content)
                         .font(.title2)
                         .fontWeight(.bold)
                         .lineLimit(3)
@@ -47,6 +47,15 @@ struct ClipboardDetailView: View {
                             .cornerRadius(8)
                             .frame(maxHeight: 500)
                             .shadow(radius: 2)
+                        
+                        // Show description below image
+                        Text(item.content)
+                            .font(.body)
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.gray.opacity(0.05))
+                            .cornerRadius(12)
+                            .textSelection(.enabled)
                     } else {
                         Text(item.content)
                             .font(.body)

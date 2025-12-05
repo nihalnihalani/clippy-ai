@@ -12,6 +12,26 @@ done
 # Kill existing processes
 killall -9 Clippy 2>/dev/null
 
+# Check and start AI Servers
+echo "🔍 Checking AI Servers..."
+SERVERS_RUNNING=true
+
+# Check Vision (8081)
+if ! lsof -i :8081 -sTCP:LISTEN -t >/dev/null; then SERVERS_RUNNING=false; fi
+# Check RAG (8082)
+if ! lsof -i :8082 -sTCP:LISTEN -t >/dev/null; then SERVERS_RUNNING=false; fi
+# Check Extract (8083)
+if ! lsof -i :8083 -sTCP:LISTEN -t >/dev/null; then SERVERS_RUNNING=false; fi
+
+if [ "$SERVERS_RUNNING" = false ]; then
+    echo "⚠️  Some servers are not running. Starting them..."
+    ./test/start_all_servers.sh
+    # Wait a bit for servers to initialize
+    sleep 3
+else
+    echo "✅ All AI servers are running."
+fi
+
 # Build
 xcodebuild -project Clippy.xcodeproj \
            -scheme Clippy \

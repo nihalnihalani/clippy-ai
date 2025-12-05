@@ -141,7 +141,8 @@ struct ContentView: View {
             clipboardMonitor.startMonitoring(
                 modelContext: modelContext,
                 clippy: clippy,
-                geminiService: geminiService
+                geminiService: geminiService,
+                localAIService: localAIService
             )
             
             startHotkeys()
@@ -216,8 +217,28 @@ struct ContentView: View {
                     print("✅ Vision parsing successful!")
                     print("   Extracted \(parsedContent.fullText.count) characters")
                     if !parsedContent.fullText.isEmpty {
-                        self.saveVisionContent(parsedContent.fullText)
-                        self.clippyController.setState(.done, message: "Saved \(parsedContent.fullText.count) chars! ✅")
+                        // If we have image data and Local AI is selected, generate a description
+                        if self.selectedAIService == .local, let imageData = parsedContent.imageData {
+                            self.clippyController.setState(.thinking, message: "Analyzing image... 🧠")
+                            
+                            Task {
+                                let base64Image = imageData.base64EncodedString()
+                                if let description = await self.localAIService.generateVisionDescription(base64Image: base64Image) {
+                                    await MainActor.run {
+                                        self.saveVisionContent(description, originalText: parsedContent.fullText)
+                                        self.clippyController.setState(.done, message: "Image analyzed! ✨")
+                                    }
+                                } else {
+                                    await MainActor.run {
+                                        self.saveVisionContent(parsedContent.fullText)
+                                        self.clippyController.setState(.done, message: "Saved text (Vision failed) ⚠️")
+                                    }
+                                }
+                            }
+                        } else {
+                            self.saveVisionContent(parsedContent.fullText)
+                            self.clippyController.setState(.done, message: "Saved \(parsedContent.fullText.count) chars! ✅")
+                        }
                     } else {
                         self.clippyController.setState(.error, message: "No text found 👀")
                     }
@@ -248,11 +269,13 @@ struct ContentView: View {
         }
     }
     
-    private func saveVisionContent(_ text: String) {
+    private func saveVisionContent(_ text: String, originalText: String? = nil) {
         // Deduplication check could be done here, but simplified for brevity
+        let contentToSave = originalText != nil ? "Image Description:\n\(text)\n\nExtracted Text:\n\(originalText!)" : text
+        
         let item = Item(
             timestamp: Date(),
-            content: text,
+            content: contentToSave,
             appName: clipboardMonitor.currentAppName,
             contentType: "vision-parsed"
         )
@@ -493,7 +516,8 @@ struct ContentView: View {
         clipboardMonitor.startMonitoring(
             modelContext: modelContext,
             clippy: clippy,
-            geminiService: geminiService
+            geminiService: geminiService,
+            localAIService: localAIService
         )
     }
     

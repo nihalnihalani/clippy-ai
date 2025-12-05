@@ -49,372 +49,181 @@ class LocalAIService: ObservableObject {
     @Published var isProcessing = false
     @Published var lastError: String?
     
-    private let endpoint: String
-    private let model: String
+    // Endpoints configuration
+    private let visionEndpoint = "http://localhost:8081/chat/completions"
+    private let ragEndpoint = "http://localhost:8082/v1/chat/completions"
+    private let extractEndpoint = "http://localhost:8083/v1/chat/completions"
     
-    // Default configuration
-    private static let defaultEndpoint = "http://10.0.0.138:1234/v1/chat/completions"
-    private static let defaultModel = "qwen/qwen3-4b"
+    // Models configuration
+    private let visionModel = "mlx-community/LFM2-VL-3B-4bit"
+    private let ragModel = "LiquidAI/LFM2-1.2B-RAG"
+    private let extractModel = "LiquidAI/LFM2-1.2B-Extract"
     
-    init(endpoint: String = LocalAIService.defaultEndpoint, model: String = LocalAIService.defaultModel) {
-        self.endpoint = endpoint
-        self.model = model
+    // Default configuration (kept for backward compatibility if needed)
+    private let defaultEndpoint = "http://localhost:8082/v1/chat/completions"
+    private let defaultModel = "LiquidAI/LFM2-1.2B-RAG"
+    
+    init() {}
+    
+    // MARK: - Vision (LFM2-VL-3B)
+    
+    /// Generate a description for an image using LFM2-VL-3B
+    func generateVisionDescription(base64Image: String) async -> String? {
+        print("👁️ [LocalAIService] Generating vision description...")
+        isProcessing = true
+        defer { isProcessing = false }
+        
+        let prompt = """
+        Analyze this screen content in high detail for future reference.
+        
+        STRICT OUTPUT FORMAT:
+        Title: [Action/Topic] - [Key Subject]
+        Files/Context:
+        1. [File 1]
+        2. [File 2]
+        (List MAX 5 distinct files. STOP after 5.)
+
+        Code:
+        - [Description of visible code]
+        - [Key variables/functions]
+
+        Terminal:
+        - [Last command]
+        - [Output summary]
+
+        Intent:
+        - [User's likely goal]
+
+        CONSTRAINTS:
+        - First line MUST be Title.
+        - Files/Context: Max 5 items. ABSOLUTELY NO REPETITION.
+        - Code/Terminal/Intent: Use bullet points.
+        - STOP generating if you start repeating.
+        """
+        
+        // Custom format for our vision server
+        let requestBody: [String: Any] = [
+            "model": visionModel,
+            "messages": [
+                [
+                    "role": "user",
+                    "content": [
+                        ["type": "text", "text": prompt],
+                        ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(base64Image)"]]
+                    ]
+                ]
+            ],
+            "max_tokens": 1024,
+            "temperature": 0.7
+        ]
+        
+        return await makeRequest(endpoint: visionEndpoint, body: requestBody, extractField: "content")
     }
     
-    /// Generate an answer based on user question and clipboard context
+    // MARK: - RAG (LFM2-1.2B-RAG)
+    
+    /// Generate an answer based on user question and clipboard context using LFM2-1.2B-RAG
     func generateAnswer(
         question: String,
         clipboardContext: [(content: String, tags: [String])],
         appName: String?
     ) async -> String? {
-        print("🤖 [LocalAIService] Generating answer...")
-        print("   Question: \(question)")
-        print("   Clipboard items: \(clipboardContext.count)")
-        
+        print("🤖 [LocalAIService] Generating RAG answer...")
         isProcessing = true
         defer { isProcessing = false }
         
-        // Build the prompt
-        let prompt = buildAnswerPrompt(question: question, clipboardContext: clipboardContext, appName: appName)
+        let contextText = buildContextString(clipboardContext)
+        let prompt = "Context:\n\(contextText)\n\nQuestion: \(question)\n\nInstructions: Answer the question DIRECTLY and CONCISELY. Do NOT use phrases like 'Based on the context', 'The answer is', or 'Here is the info'. Just output the answer. If the answer is a name, output ONLY the name. If it's a key, output ONLY the key.\n\nAnswer:"
         
-        // Make API call
-        guard let answer = await callLocalAIForAnswer(prompt: prompt) else {
-            print("   ❌ Failed to generate answer")
+        let requestBody: [String: Any] = [
+            "model": ragModel,
+            "messages": [
+                ["role": "user", "content": prompt]
+            ],
+            "max_tokens": 256,
+            "temperature": 0.3
+        ]
+        
+        return await makeRequest(endpoint: ragEndpoint, body: requestBody, extractField: "content")
+    }
+    
+    // MARK: - Extract (LFM2-1.2B-Extract)
+    
+    /// Extract structured data from text using LFM2-1.2B-Extract
+    func extractStructuredData(text: String, schema: String) async -> String? {
+        print("⛏️ [LocalAIService] Extracting data...")
+        isProcessing = true
+        defer { isProcessing = false }
+        
+        let prompt = "Extract the following information from the text. Return ONLY the requested data in the specified format. No conversational text.\nText: \"\(text)\"\nSchema: \(schema)"
+        
+        let requestBody: [String: Any] = [
+            "model": extractModel,
+            "messages": [
+                ["role": "user", "content": prompt]
+            ],
+            "max_tokens": 512,
+            "temperature": 0.1
+        ]
+        
+        return await makeRequest(endpoint: extractEndpoint, body: requestBody, extractField: "content")
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func buildContextString(_ clipboardContext: [(content: String, tags: [String])]) -> String {
+        if clipboardContext.isEmpty { return "No context available." }
+        return clipboardContext.enumerated().map { index, item in
+            let tagsText = item.tags.isEmpty ? "" : " [Tags: \(item.tags.joined(separator: ", "))]"
+            return "[\(index + 1)]\(tagsText)\n\(item.content)"
+        }.joined(separator: "\n\n---\n\n")
+    }
+    
+    private func makeRequest(endpoint: String, body: [String: Any], extractField: String) async -> String? {
+        guard let url = URL(string: endpoint) else {
+            lastError = "Invalid URL: \(endpoint)"
             return nil
         }
         
-        print("   ✅ Generated answer: \(answer.prefix(100))...")
-        return answer
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+                print("❌ API Error (\(endpoint)): \(errorMessage)")
+                lastError = "API Error: \(errorMessage)"
+                return nil
+            }
+            
+            let decoder = JSONDecoder()
+            let apiResponse = try decoder.decode(LocalAIResponse.self, from: data)
+            
+            if let content = apiResponse.choices?.first?.message?.content {
+                return content.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            
+            return nil
+            
+        } catch {
+            print("❌ Network Error: \(error)")
+            lastError = error.localizedDescription
+            return nil
+        }
     }
     
-    /// Generate semantic tags for clipboard content to improve retrieval
-    /// Returns tags like: ["terminal", "python", "code", "error_message"]
-    func generateTags(
-        content: String,
-        appName: String?,
-        context: String?
-    ) async -> [String] {
-        print("🏷️  [LocalAIService] Generating tags...")
-        print("   Content: \(content.prefix(100))...")
-        print("   App: \(appName ?? "Unknown")")
-        
-        isProcessing = true
-        defer { isProcessing = false }
-        
-        // Build the prompt
-        let prompt = buildTaggingPrompt(content: content, appName: appName, context: context)
-        
-        // Make API call
-        guard let tags = await callLocalAI(prompt: prompt) else {
-            print("   ❌ Failed to generate tags")
+    /// Compatibility method for existing code (Tagging) - uses RAG model for now
+    func generateTags(content: String, appName: String?, context: String?) async -> [String] {
+        // Simple implementation using RAG model for tagging
+        let prompt = "Generate 3-5 keywords/tags for this text: \"\(content.prefix(200))\""
+        guard let response = await generateAnswer(question: prompt, clipboardContext: [], appName: appName) else {
             return []
         }
-        
-        print("   ✅ Generated tags: \(tags)")
-        return tags
-    }
-    
-    private func buildAnswerPrompt(question: String, clipboardContext: [(content: String, tags: [String])], appName: String?) -> String {
-        let contextText: String
-        if clipboardContext.isEmpty {
-            contextText = "No clipboard context available."
-        } else {
-            contextText = clipboardContext.enumerated().map { index, item in
-                let tagsText = item.tags.isEmpty ? "" : " [Tags: \(item.tags.joined(separator: ", "))]"
-                return "[\(index + 1)]\(tagsText)\n\(item.content)"
-            }.joined(separator: "\n\n---\n\n")
-        }
-        
-        let prompt = """
-        You are a Clippy assistant. You only answer questions about the clipboard history. You don't answer questions about other topics. Answer the user's question based on the provided context from their clipboard history. /no_think
-        
-        User Question: \(question)
-        
-        Clipboard Context (with semantic tags for better understanding):
-        \(contextText)
-        
-        App: \(appName ?? "Unknown")
-        
-        Instructions:
-        - Extract and return ONLY the specific information requested in the question
-        - DO NOT add any preamble, explanation, or extra words
-        - DO NOT say things like "The tracking number is..." or "Your answer is..."
-        - Just return the raw requested data with NO additional text
-        - Use the semantic tags to better understand the context and relevance of each clipboard item
-        - If the clipboard context is not relevant, return an empty string
-        - Keep the answer minimal and direct
-        - Do not include any meta-commentary about the clipboard or context
-        
-        Examples:
-        - Question: "tracking number" → Answer: "1ZAC65432428054431" (NOT "Your tracking number is 1ZAC65432428054431")
-        - Question: "email address" → Answer: "user@example.com" (NOT "The email address is user@example.com")
-        - Question: "what is the total?" → Answer: "$42.50" (NOT "The total is $42.50")
-        
-        Return your answer in JSON format:
-        {
-          "A": "your answer here"
-        }
-
-        If question is not about the clipboard history, return an empty string as your answer:
-        {"A": ""}
-        
-        Return ONLY the JSON with the raw answer, nothing else. No preamble, no explanations, no additional text.
-        """
-        
-        return prompt
-    }
-    
-    private func buildTaggingPrompt(content: String, appName: String?, context: String?) -> String {
-        // Get time of day
-        let hour = Calendar.current.component(.hour, from: Date())
-        let timeOfDay = switch hour {
-        case 5..<12: "morning"
-        case 12..<17: "afternoon"
-        case 17..<22: "evening"
-        default: "night"
-        }
-        
-        let prompt = """
-        App: \(appName ?? "Unknown")
-        Time: \(timeOfDay)
-        Content: \(content.prefix(500))
-        
-        Generate 3-7 semantic tags for this clipboard item. Focus on content type, domain, and key topics. /no_think
-        
-        Return output in the form of JSON:
-        {
-          "tags": ["tag1", "tag2", "tag3"]
-        }
-        
-        Return ONLY the JSON, nothing else. No explanations, no additional text.
-        """
-        
-        return prompt
-    }
-    
-    private func callLocalAIForAnswer(prompt: String) async -> String? {
-        guard let url = URL(string: endpoint) else {
-            lastError = "Invalid URL"
-            return nil
-        }
-        
-        print("   📤 Sending prompt to LocalAI for answer:")
-        print("   \(prompt)")
-        
-        let requestBody: [String: Any] = [
-            "model": model,
-            "messages": [
-                [
-                    "role": "user",
-                    "content": prompt
-                ]
-            ],
-            "temperature": 0.7,
-            "max_tokens": 2048,
-            "stream": false
-        ]
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-            
-            // Print request body for debugging
-            if let requestJSON = try? JSONSerialization.data(withJSONObject: requestBody),
-               let requestString = String(data: requestJSON, encoding: .utf8) {
-                print("   📤 Request Body: \(requestString)")
-            }
-            
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
-                lastError = "Invalid response"
-                return nil
-            }
-            
-            print("   📡 LocalAI Response Status: \(httpResponse.statusCode)")
-            
-            // Print raw response for debugging
-            if let rawResponse = String(data: data, encoding: .utf8) {
-                print("   📄 Raw Response: \(rawResponse)")
-            }
-            
-            guard httpResponse.statusCode == 200 else {
-                let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-                lastError = "API Error (\(httpResponse.statusCode)): \(errorMessage)"
-                print("   ❌ API Error: \(errorMessage)")
-                return nil
-            }
-            
-            // Parse response
-            let decoder = JSONDecoder()
-            let apiResponse = try decoder.decode(LocalAIResponse.self, from: data)
-            
-            // Extract content from response
-            guard let choices = apiResponse.choices,
-                  let firstChoice = choices.first,
-                  let message = firstChoice.message,
-                  let content = message.content else {
-                lastError = "No content in response"
-                print("   ❌ No content found in response")
-                return nil
-            }
-            
-            print("   📝 Extracted content: \(content)")
-            
-            // Clean the content by removing <think> tags and extracting JSON
-            let cleanedContent = cleanLocalAIResponse(content)
-            print("   🧹 Cleaned content: \(cleanedContent)")
-            
-            // Parse the JSON to extract the answer from "A" field
-            if let jsonData = cleanedContent.data(using: .utf8),
-               let jsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-               let answer = jsonObject["A"] as? String {
-                let cleanAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-                print("   ✅ Parsed answer: \(cleanAnswer.prefix(200))...")
-                return cleanAnswer
-            }
-            
-            // Fallback if JSON parsing fails - return raw content
-            print("   ⚠️ JSON parsing failed, returning raw content")
-            return cleanedContent.trimmingCharacters(in: .whitespacesAndNewlines)
-            
-        } catch {
-            lastError = error.localizedDescription
-            print("   ❌ Error: \(error)")
-            return nil
-        }
-    }
-    
-    private func callLocalAI(prompt: String) async -> [String]? {
-        guard let url = URL(string: endpoint) else {
-            lastError = "Invalid URL"
-            return nil
-        }
-        
-        print("   📤 Sending prompt to LocalAI for tagging:")
-        print("   \(prompt)")
-        
-        let requestBody: [String: Any] = [
-            "model": model,
-            "messages": [
-                [
-                    "role": "user",
-                    "content": prompt
-                ]
-            ],
-            "temperature": 0.3,
-            "max_tokens": 1024,
-            "stream": false
-        ]
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-            
-            // Print request body for debugging
-            if let requestJSON = try? JSONSerialization.data(withJSONObject: requestBody),
-               let requestString = String(data: requestJSON, encoding: .utf8) {
-                print("   📤 Request Body: \(requestString)")
-            }
-            
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
-                lastError = "Invalid response"
-                return nil
-            }
-            
-            print("   📡 LocalAI Response Status: \(httpResponse.statusCode)")
-            
-            // Print raw response for debugging
-            if let rawResponse = String(data: data, encoding: .utf8) {
-                print("   📄 Raw Response: \(rawResponse)")
-            }
-            
-            guard httpResponse.statusCode == 200 else {
-                let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-                lastError = "API Error (\(httpResponse.statusCode)): \(errorMessage)"
-                print("   ❌ API Error: \(errorMessage)")
-                return nil
-            }
-            
-            // Parse response
-            let decoder = JSONDecoder()
-            let apiResponse = try decoder.decode(LocalAIResponse.self, from: data)
-            
-            // Extract tags from response
-            guard let choices = apiResponse.choices,
-                  let firstChoice = choices.first,
-                  let message = firstChoice.message,
-                  let content = message.content else {
-                lastError = "No content in response"
-                print("   ❌ No content found in response")
-                return nil
-            }
-            
-            print("   📝 Extracted content: \(content)")
-            
-            // Clean the content by removing <think> tags and extracting JSON
-            let cleanedContent = cleanLocalAIResponse(content)
-            print("   🧹 Cleaned content: \(cleanedContent)")
-            
-            // Try parsing as JSON first
-            if let jsonData = cleanedContent.data(using: .utf8),
-               let jsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-               let tagsArray = jsonObject["tags"] as? [String] {
-                let tags = tagsArray.map { $0.lowercased() }.filter { !$0.isEmpty }
-                print("   ✅ Parsed JSON tags: \(tags)")
-                return tags
-            }
-            
-            // Fallback to comma-separated parsing
-            print("   ⚠️ JSON parsing failed, trying comma-separated format")
-            let tags = cleanedContent
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                .filter { !$0.isEmpty }
-            
-            return tags
-            
-        } catch {
-            lastError = error.localizedDescription
-            print("   ❌ Error: \(error)")
-            return nil
-        }
-    }
-    
-    /// Clean Local AI response by removing <think> tags and extracting JSON
-    private func cleanLocalAIResponse(_ content: String) -> String {
-        var cleaned = content
-        
-        // Remove <think>...</think> tags (including multiline)
-        let thinkPattern = #"<think>.*?</think>"#
-        cleaned = cleaned.replacingOccurrences(of: thinkPattern, with: "", options: [.regularExpression, .caseInsensitive])
-        
-        // Remove any remaining <think> tags without closing tags
-        cleaned = cleaned.replacingOccurrences(of: "<think>", with: "", options: .caseInsensitive)
-        cleaned = cleaned.replacingOccurrences(of: "</think>", with: "", options: .caseInsensitive)
-        
-        // Trim whitespace and newlines
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Look for JSON pattern { "A": "..." }
-        if let jsonRange = cleaned.range(of: #"\{[^}]*"A"[^}]*\}"#, options: .regularExpression) {
-            cleaned = String(cleaned[jsonRange])
-        }
-        
-        return cleaned
-    }
-    
-    /// Convenience method to create service with custom endpoint
-    static func withEndpoint(_ endpoint: String, model: String = "qwen/qwen3-4b") -> LocalAIService {
-        return LocalAIService(endpoint: endpoint, model: model)
+        return response.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 }
