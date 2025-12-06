@@ -22,12 +22,17 @@ class GeminiService: ObservableObject {
     @Published var lastError: String?
     @Published var lastErrorMessage: String? // User-friendly error message
     
-    private let apiKey: String
+    private var apiKey: String
     private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models"
     private let modelName = "gemini-2.5-flash"
     
     init(apiKey: String) {
         self.apiKey = apiKey
+    }
+    
+    /// Update the API key
+    func updateApiKey(_ key: String) {
+        self.apiKey = key
     }
     
     /// Check if API key is configured

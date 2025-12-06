@@ -15,7 +15,7 @@ class Clippy: ObservableObject {
         print("🚀 [Clippy] Initializing...")
         do {
             let config = VecturaConfig(
-                name: "pastepup-clipboard",
+                name: "pastepup-clipboard-v2",
                 dimension: nil as Int? // Auto-detect from model
             )
             
@@ -34,21 +34,29 @@ class Clippy: ObservableObject {
     }
     
     func addDocument(vectorId: UUID, text: String) async {
+        await addDocuments(items: [(vectorId, text)])
+    }
+    
+    func addDocuments(items: [(UUID, String)]) async {
         guard let vectorDB = vectorDB else { 
-            print("⚠️ [Clippy] Cannot add document - vectorDB not initialized")
+            print("⚠️ [Clippy] Cannot add documents - vectorDB not initialized")
             return 
         }
         
-        print("📝 [Clippy] Adding document: \(text.prefix(50))...")
+        let count = items.count
+        print("📝 [Clippy] Adding \(count) documents...")
         
         do {
+            let texts = items.map { $0.1 }
+            let ids = items.map { $0.0 }
+            
             _ = try await vectorDB.addDocuments(
-                texts: [text],
-                ids: [vectorId]
+                texts: texts,
+                ids: ids
             )
-            print("   ✅ Document added with ID: \(vectorId)")
+            print("   ✅ Added \(count) documents to Vector DB")
         } catch {
-            print("   ❌ Failed to add document: \(error)")
+            print("   ❌ Failed to add documents: \(error)")
         }
     }
     
@@ -79,16 +87,9 @@ class Clippy: ObservableObject {
         }
     }
     
-    func deleteDocument(vectorId: UUID) {
+    func deleteDocument(vectorId: UUID) async throws {
         guard let vectorDB = vectorDB else { return }
         
-        Task {
-            do {
-                try await vectorDB.deleteDocuments(ids: [vectorId])
-            } catch {
-                print("Failed to delete document: \(error)")
-            }
-        }
+        try await vectorDB.deleteDocuments(ids: [vectorId])
     }
 }
-

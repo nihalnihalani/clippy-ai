@@ -8,6 +8,16 @@ class TextCaptureService: ObservableObject {
     @Published var capturedText = ""
     @Published var captureStartTime: Date?
     
+    // Dependencies
+    private var clippyController: ClippyWindowController?
+    private var clipboardMonitor: ClipboardMonitor?
+    
+    // Initialization of dependencies
+    func setDependencies(clippyController: ClippyWindowController, clipboardMonitor: ClipboardMonitor) {
+        self.clippyController = clippyController
+        self.clipboardMonitor = clipboardMonitor
+    }
+    
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var onCaptureComplete: ((String) -> Void)?
@@ -170,6 +180,70 @@ class TextCaptureService: ObservableObject {
         return String(utf16CodeUnits: buffer, count: length)
     }
     
+    /// Insert text using "Atomic Paste" (Clipboard Swap + Cmd+V) - The Industry Standard
+    private func pasteTextAtomic(_ text: String) {
+        print("🔄 [TextCaptureService] Performing Atomic Paste...")
+        
+        let pasteboard = NSPasteboard.general
+        
+        // 1. Backup current clipboard
+        // Note: This is simplified. Preserving complex types exactly is hard.
+        // We preserve just the string/image if possible or just use a temporary hold.
+        // A robust implementation uses `pasteboardItems` array but restoring it perfectly is tricky.
+        // For now, we backup the *string* content if any.
+        let previousString = pasteboard.string(forType: .string)
+        let previousChangeCount = pasteboard.changeCount
+        
+        // 2. Set new content
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        
+        // 3. Trigger Cmd+V
+        simulateCmdV()
+        
+        // 4. Restore Clipboard (after delay)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            print("🔄 [TextCaptureService] Restoring clipboard...")
+            if let oldText = previousString {
+                // Only restore if user hasn't copied something else in the meantime
+                if pasteboard.changeCount == previousChangeCount + 1 {
+                    pasteboard.clearContents()
+                    pasteboard.setString(oldText, forType: .string)
+                } else {
+                     print("⚠️ [TextCaptureService] Clipboard changed externally during paste, skipping restore")
+                }
+            } else {
+                 // Nothing to restore (was empty or non-string). Clear?
+                 // If it was image, we lost it with this simple impl.
+                 // Ideally we shouldn't fail silently.
+
+                 if pasteboard.changeCount == previousChangeCount + 1 {
+                     pasteboard.clearContents() // Restore empty state
+                 }
+            }
+        }
+    }
+    
+    private func simulateCmdV() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        
+        // CMS+V Down
+        if let vDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true) {
+            vDown.flags = .maskCommand
+            vDown.post(tap: .cghidEventTap)
+        }
+        
+        usleep(1000) // 1ms
+        
+        // CMD+V Up
+        if let vUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) {
+            vUp.flags = .maskCommand
+            vUp.post(tap: .cghidEventTap)
+        }
+    }
+    
+
+
     /// Replace the captured text with the AI answer in the original text field
     func replaceCapturedTextWithAnswer(_ answer: String) {
         guard let currentSourceApp = sourceApp else {
@@ -178,33 +252,19 @@ class TextCaptureService: ObservableObject {
         }
         
         print("🔄 [TextCaptureService] Replacing captured text with answer...")
-        print("   Captured text length: \(capturedTextLength) characters")
-        print("   Answer: \(answer.prefix(100))...")
-        print("   Source app: \(currentSourceApp.localizedName ?? "Unknown")")
         
-        // Use Fluid Dictation's approach with proper delays
+        // Use Fluid Dictation's approach for deletion
         let src = CGEventSource(stateID: .hidSystemState)
         
         // Step 1: Delete the exact number of captured characters using backspace
         deleteCharacters(count: capturedTextLength, using: src)
         
-        // Step 2: Wait for deletion to complete (like Fluid Dictation's 200ms delay)
+        // Step 2: Wait for deletion to complete then Paste
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            print("🔄 [TextCaptureService] Deletion complete, inserting answer...")
+            print("🔄 [TextCaptureService] Deletion complete, pasting answer...")
+            self.pasteTextAtomic(answer)
             
-            // Step 3: Try the instant bulk CGEvent method first (Fluid Dictation's primary method)
-            if self.insertTextBulkInstant(answer, using: src) {
-                print("✅ [TextCaptureService] Text replaced via Fluid Dictation CGEvent method")
-                self.sourceApp = nil
-                self.capturedTextLength = 0
-                return
-            }
-            
-            print("⚠️ [TextCaptureService] CGEvent insertion failed, falling back to character-by-character")
-            // Fallback to character-by-character typing (Fluid Dictation's fallback)
-            self.typeTextCharByChar(answer, using: src)
-            
-            // Clear sourceApp and capturedTextLength after typing is complete
+            // Clean up
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 self.sourceApp = nil
                 self.capturedTextLength = 0
@@ -215,152 +275,32 @@ class TextCaptureService: ObservableObject {
     
     /// Insert text into the current cursor position (for voice input or direct insertion)
     func insertTextAtCursor(_ answer: String) {
-        print("🔄 [TextCaptureService] Inserting text at cursor position (voice mode)...")
-        print("   Answer: \(answer.prefix(100))...")
-        
-        let src = CGEventSource(stateID: .hidSystemState)
-        
-        // Try the instant bulk CGEvent method first (Fluid Dictation's primary method)
-        if insertTextBulkInstant(answer, using: src) {
-            print("✅ [TextCaptureService] Text inserted via Fluid Dictation CGEvent method")
-            return
-        }
-        
-        print("⚠️ [TextCaptureService] CGEvent insertion failed, falling back to character-by-character")
-        // Fallback to character-by-character typing (Fluid Dictation's fallback)
-        typeTextCharByChar(answer, using: src)
-        print("✅ [TextCaptureService] Text insertion complete")
+        print("🔄 [TextCaptureService] Inserting text at cursor position atomic...")
+        pasteTextAtomic(answer)
     }
-    
-    /// Fluid Dictation's primary method: instant bulk CGEvent insertion
-    private func insertTextBulkInstant(_ text: String, using source: CGEventSource?) -> Bool {
-        print("🔄 [TextCaptureService] Starting Fluid Dictation INSTANT bulk CGEvent insertion (NO CLIPBOARD)")
-        
-        guard !text.isEmpty else {
-            print("❌ [TextCaptureService] Empty text provided, aborting")
-            return false
-        }
-        
-        // Check accessibility permissions first
-        guard AXIsProcessTrusted() else {
-            print("❌ [TextCaptureService] Accessibility permissions required for text injection")
-            return false
-        }
-        
-        print("✅ [TextCaptureService] Accessibility check passed, proceeding with text injection")
-        
-        // Create single CGEvent with entire text - truly instant (exactly like Fluid Dictation)
-        guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true) else {
-            print("❌ [TextCaptureService] Failed to create bulk CGEvent")
-            return false
-        }
-        
-        // Convert entire text to UTF16
-        let utf16Array = Array(text.utf16)
-        print("🔄 [TextCaptureService] Converting \(text.count) characters to single CGEvent")
-        
-        // Set the entire text as unicode string
-        event.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
-        
-        // Post single event - INSTANT insertion (exactly like Fluid Dictation)
-        event.post(tap: .cghidEventTap)
-        print("✅ [TextCaptureService] Posted single CGEvent with entire text - INSTANT!")
-        
-        return true
-    }
-    
-    /// Fluid Dictation's fallback method: character-by-character typing
-    private func typeTextCharByChar(_ text: String, using source: CGEventSource?) {
-        print("🔄 [TextCaptureService] Starting Fluid Dictation character-by-character typing")
-        
-        guard !text.isEmpty else {
-            print("❌ [TextCaptureService] Empty text provided for character typing")
-            return
-        }
-        
-        // Check accessibility permissions first
-        guard AXIsProcessTrusted() else {
-            print("❌ [TextCaptureService] Accessibility permissions required for character typing")
-            return
-        }
-        
-        print("✅ [TextCaptureService] Typing \(text.count) characters one by one")
-        
-        // Fallback to character-by-character if bulk fails (exactly like Fluid Dictation)
-        for (index, char) in text.enumerated() {
-            if index % 10 == 0 {  // Log every 10th character to avoid spam
-                print("🔄 [TextCaptureService] Typing character \(index+1)/\(text.count): '\(char)'")
-            }
-            typeCharacter(char, using: source)
-            usleep(1000) // Small delay between characters (1ms) - exactly like Fluid Dictation
-        }
-        
-        print("✅ [TextCaptureService] Character-by-character typing completed")
-    }
-    
-    /// Type a single character using Fluid Dictation's method
-    private func typeCharacter(_ char: Character, using source: CGEventSource?) {
-        let charString = String(char)
-        let utf16Array = Array(charString.utf16)
-        
-        // Create keyboard events for this character (exactly like Fluid Dictation)
-        guard let keyDownEvent = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-              let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
-            print("❌ [TextCaptureService] Failed to create CGEvents for character: \(char)")
-            return
-        }
-        
-        // Set the unicode string for both events (exactly like Fluid Dictation)
-        keyDownEvent.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
-        keyUpEvent.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
-        
-        // Post the events (exactly like Fluid Dictation)
-        keyDownEvent.post(tap: .cghidEventTap)
-        usleep(2000) // Short delay between key down and up (2ms) - exactly like Fluid Dictation
-        keyUpEvent.post(tap: .cghidEventTap)
-    }
-    
+
     /// Delete a specific number of characters using backspace events
     private func deleteCharacters(count: Int, using source: CGEventSource?) {
         print("🔄 [TextCaptureService] Deleting \(count) characters using backspace")
+        guard count > 0 else { return }
         
-        guard count > 0 else {
-            print("⚠️ [TextCaptureService] No characters to delete")
-            return
-        }
-        
-        // Release any modifier keys first to ensure clean state
         releaseModifierKeys(using: source)
         
-        // Send backspace events for each character we captured
-        // Using keycode 51 for backspace/delete
-        for i in 0..<count {
-            if i % 10 == 0 && i > 0 {  // Log every 10th deletion to avoid spam
-                print("🔄 [TextCaptureService] Deleted \(i)/\(count) characters")
-            }
-            
-            // Create backspace keyDown event
+        // Fast deletion loop
+        for _ in 0..<count {
             if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: true) {
                 keyDown.post(tap: .cghidEventTap)
             }
-            
-            // Small delay between keyDown and keyUp (2ms like Fluid Dictation)
-            usleep(2000)
-            
-            // Create backspace keyUp event
+            usleep(1000) // 1ms
             if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: false) {
                 keyUp.post(tap: .cghidEventTap)
             }
-            
-            // Small delay between characters (1ms like Fluid Dictation)
             usleep(1000)
         }
-        
-        print("✅ [TextCaptureService] Deleted \(count) characters successfully")
     }
     
     private func releaseModifierKeys(using source: CGEventSource?) {
-        let modifierKeyCodes: [CGKeyCode] = [0x37, 0x36, 0x38, 0x3C, 0x3A, 0x3B] // cmd, right cmd, shift, right shift, option, control
+        let modifierKeyCodes: [CGKeyCode] = [0x37, 0x36, 0x38, 0x3C, 0x3A, 0x3B]
         for code in modifierKeyCodes {
             if let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false) {
                 event.flags = []

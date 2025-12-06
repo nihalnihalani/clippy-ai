@@ -59,9 +59,7 @@ class LocalAIService: ObservableObject {
     private let ragModel = "LiquidAI/LFM2-1.2B-RAG"
     private let extractModel = "LiquidAI/LFM2-1.2B-Extract"
     
-    // Default configuration (kept for backward compatibility if needed)
-    private let defaultEndpoint = "http://localhost:8082/v1/chat/completions"
-    private let defaultModel = "LiquidAI/LFM2-1.2B-RAG"
+
     
     init() {}
     
@@ -131,10 +129,16 @@ class LocalAIService: ObservableObject {
     
     // MARK: - RAG (LFM2-1.2B-RAG)
     
+    // MARK: - Types
+    
+    typealias RAGContextItem = (content: String, tags: [String], type: String, timestamp: Date, title: String?)
+    
+    // MARK: - RAG (LFM2-1.2B-RAG)
+    
     /// Generate an answer based on user question and clipboard context using LFM2-1.2B-RAG
     func generateAnswer(
         question: String,
-        clipboardContext: [(content: String, tags: [String])],
+        clipboardContext: [RAGContextItem],
         appName: String?
     ) async -> String? {
         print("🤖 [LocalAIService] Generating RAG answer...")
@@ -143,16 +147,15 @@ class LocalAIService: ObservableObject {
         
         let contextText = buildContextString(clipboardContext)
         let prompt = """
-        Context:
+        <context>
         \(contextText)
+        </context>
         
         Question: \(question)
         
         Instructions:
-        Answer the question accurately based on the Context.
-        - If the user asks for a list (e.g., "all API keys"), list them clearly (e.g., Name=Value).
-        - If the answer is found in the context, provide it exactly as it appears.
-        - If the answer is NOT in the context, say "I couldn't find that information in your clipboard history."
+        1. Answer the Question accurately based on the <context>.
+        2. If the answer is NOT in the <context>, reply with "I couldn't find that information in your clipboard history."
         
         Answer:
         """
@@ -167,6 +170,58 @@ class LocalAIService: ObservableObject {
         ]
         
         return await makeRequest(endpoint: ragEndpoint, body: requestBody, extractField: "content")
+    }
+
+    /// Generate a streaming answer
+    func generateAnswerStream(
+        question: String,
+        clipboardContext: [RAGContextItem],
+        appName: String?
+    ) -> AsyncThrowingStream<String, Error> {
+        print("🤖 [LocalAIService] Generating Streaming RAG answer...")
+        // Note: isProcessing isn't easily toggleable here since it returns immediately.
+        // The consumer should handle loading state.
+        
+        let contextText = buildContextString(clipboardContext) // Uses default safe limit (10k)
+        let prompt = """
+        <context>
+        \(contextText)
+        </context>
+        
+        Question: \(question)
+        
+        Instructions:
+        1. Answer the Question using ONLY the information provided in the <context>.
+        2. If the answer is in the <context>, provide it exactly.
+        3. If the answer is NOT in the <context>, reply with "I couldn't find that information in your clipboard history."
+        
+        Answer:
+        """
+        
+        print("📝 [LocalAIService] RAG Prompt Preview:\n\(prompt.prefix(200))...")
+        
+        let requestBody: [String: Any] = [
+            "model": ragModel,
+            "messages": [
+                ["role": "user", "content": prompt]
+            ],
+            "max_tokens": 512,
+            "temperature": 0.3
+        ]
+        
+        // We need to call actor synchronously to get the stream object, 
+        // but actor calls are async.
+        // AsyncThrowingStream init can wrap the async call.
+        
+        return AsyncThrowingStream { continuation in
+            Task {
+                let stream = await AIActor.shared.makeRequestStream(endpoint: ragEndpoint, body: requestBody, apiKey: nil)
+                for try await token in stream {
+                    continuation.yield(token)
+                }
+                continuation.finish()
+            }
+        }
     }
     
     // MARK: - Extract (LFM2-1.2B-Extract)
@@ -191,50 +246,96 @@ class LocalAIService: ObservableObject {
         return await makeRequest(endpoint: extractEndpoint, body: requestBody, extractField: "content")
     }
     
+    // MARK: - Transform (LFM2-1.2B-RAG)
+    
+    /// Transform text based on an instruction
+    func transformText(text: String, instruction: String) async -> String? {
+        print("🪄 [LocalAIService] Transforming text...")
+        isProcessing = true
+        defer { isProcessing = false }
+        
+        // Truncate input if necessary
+        let safeText = String(text.prefix(3000))
+        
+        let prompt = """
+        Instruction: \(instruction)
+        
+        Input Text:
+        \(safeText)
+        
+        Output:
+        """
+        
+        let requestBody: [String: Any] = [
+            "model": ragModel, // Reuse RAG model for general instructions
+            "messages": [
+                ["role": "user", "content": prompt]
+            ],
+            "max_tokens": 1024,
+            "temperature": 0.2
+        ]
+        
+        return await makeRequest(endpoint: ragEndpoint, body: requestBody, extractField: "content")
+    }
+    
     // MARK: - Helper Methods
     
-    private func buildContextString(_ clipboardContext: [(content: String, tags: [String])]) -> String {
+    private func buildContextString(_ clipboardContext: [RAGContextItem], maxLength: Int = 10000) -> String {
         if clipboardContext.isEmpty { return "No context available." }
-        return clipboardContext.enumerated().map { index, item in
-            let tagsText = item.tags.isEmpty ? "" : " [Tags: \(item.tags.joined(separator: ", "))]"
-            return "[\(index + 1)]\(tagsText)\n\(item.content)"
-        }.joined(separator: "\n\n---\n\n")
+        
+        let now = Date()
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        
+        var currentLength = 0
+        var builtString = ""
+        
+        for (index, item) in clipboardContext.enumerated() {
+            let timeString = formatter.localizedString(for: item.timestamp, relativeTo: now)
+            var metaParts: [String] = []
+            
+            // Type & Time
+            metaParts.append("[Type: \(item.type)]")
+            metaParts.append("[Time: \(timeString)]")
+            
+            // Title
+            if let title = item.title, !title.isEmpty {
+                metaParts.append("[Title: \(title)]")
+            }
+            
+            // Tags
+            if !item.tags.isEmpty {
+                metaParts.append("[Tags: \(item.tags.joined(separator: ", "))]")
+            }
+            
+            let metaLine = metaParts.joined(separator: " ")
+            let itemString = "[\(index + 1)] \(metaLine)\n\(item.content)"
+            
+            // Check length limit
+            if currentLength + itemString.count > maxLength {
+                builtString += "\n\n... (Context truncated)"
+                break
+            }
+            
+            if !builtString.isEmpty {
+                builtString += "\n\n---\n\n"
+            }
+            builtString += itemString
+            currentLength += builtString.count
+        }
+        
+        return builtString
     }
     
     private func makeRequest(endpoint: String, body: [String: Any], extractField: String) async -> String? {
-        guard let url = URL(string: endpoint) else {
-            lastError = "Invalid URL: \(endpoint)"
-            return nil
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
         do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-                print("❌ API Error (\(endpoint)): \(errorMessage)")
-                lastError = "API Error: \(errorMessage)"
-                return nil
-            }
-            
-            let decoder = JSONDecoder()
-            let apiResponse = try decoder.decode(LocalAIResponse.self, from: data)
-            
-            if let content = apiResponse.choices?.first?.message?.content {
-                return content.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            
-            return nil
-            
+            // Offload networking and parsing to background actor
+            let result = try await AIActor.shared.makeRequest(endpoint: endpoint, body: body, apiKey: nil)
+            return result
         } catch {
-            print("❌ Network Error: \(error)")
-            lastError = error.localizedDescription
+            print("❌ [LocalAIService] Request failed: \(error.localizedDescription)")
+            // Update UI state on Main Actor
+            self.lastError = error.localizedDescription
             return nil
         }
     }

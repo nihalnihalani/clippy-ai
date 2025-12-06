@@ -6,12 +6,13 @@ struct ClipboardListView: View {
     var category: NavigationCategory?
     var searchText: String
     
-    @EnvironmentObject var clippy: Clippy
+    @EnvironmentObject var container: AppDependencyContainer
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Item.timestamp, order: .reverse) private var allItems: [Item]
     
     @State private var searchResults: [Item] = []
     @State private var isSearching = false
+    @State private var searchTask: Task<Void, Never>?
     
     var body: some View {
         List(selection: $selectedItem) {
@@ -20,6 +21,41 @@ struct ClipboardListView: View {
                 ForEach(filteredItems) { item in
                     ClipboardItemRow(item: item)
                         .tag(item)
+                        .contextMenu {
+                            Button {
+                                copyToClipboard(item)
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                            }
+                            
+                            Divider()
+                            
+                            Button {
+                                performTransform(item, instruction: "Fix grammar and spelling.")
+                            } label: {
+                                Label("Fix Grammar", systemImage: "text.badge.checkmark")
+                            }
+                            
+                            Button {
+                                performTransform(item, instruction: "Summarize this text in one sentence.")
+                            } label: {
+                                Label("Summarize", systemImage: "text.quote")
+                            }
+                            
+                            Button {
+                                performTransform(item, instruction: "Convert this to valid JSON.")
+                            } label: {
+                                Label("To JSON", systemImage: "curlybraces")
+                            }
+                            
+                            Divider()
+                            
+                            Button(role: .destructive) {
+                                deleteItem(item)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                 }
             } else {
                 // Search Results View
@@ -34,9 +70,45 @@ struct ClipboardListView: View {
                 } else if searchResults.isEmpty {
                     ContentUnavailableView.search(text: searchText)
                 } else {
+
                     ForEach(searchResults) { item in
                         ClipboardItemRow(item: item)
                             .tag(item)
+                            .contextMenu {
+                                Button {
+                                    copyToClipboard(item)
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                }
+                                
+                                Divider()
+                                
+                                Button {
+                                    performTransform(item, instruction: "Fix grammar and spelling.")
+                                } label: {
+                                    Label("Fix Grammar", systemImage: "text.badge.checkmark")
+                                }
+                                
+                                Button {
+                                    performTransform(item, instruction: "Summarize this text in one sentence.")
+                                } label: {
+                                    Label("Summarize", systemImage: "text.quote")
+                                }
+                                
+                                Button {
+                                    performTransform(item, instruction: "Convert this to valid JSON.")
+                                } label: {
+                                    Label("To JSON", systemImage: "curlybraces")
+                                }
+                                
+                                Divider()
+                                
+                                Button(role: .destructive) {
+                                    deleteItem(item)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                     }
                 }
             }
@@ -44,7 +116,46 @@ struct ClipboardListView: View {
         .listStyle(.inset)
         .navigationTitle(category?.rawValue ?? "Clipboard")
         .onChange(of: searchText) { _, newValue in
-            performSearch(query: newValue)
+            // Cancel previous task
+            searchTask?.cancel()
+            
+            guard !newValue.isEmpty else {
+                searchResults = []
+                isSearching = false
+                return
+            }
+            
+            isSearching = true
+            
+            searchTask = Task {
+                // Debounce
+                try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                
+                if Task.isCancelled { return }
+                
+                // 1. Perform semantic search
+                let results = await container.clippy.search(query: newValue, limit: 20)
+                
+                if Task.isCancelled { return }
+                
+                // 2. Map IDs back to Items
+                let ids = results.map { $0.0 }
+                
+                await MainActor.run {
+                    if Task.isCancelled { return }
+                    
+                    // Efficiently find items in current loaded list
+                    // Note: For very large datasets, we might need a direct fetch by ID
+                    let foundItems = allItems.filter { ids.contains($0.vectorId ?? UUID()) }
+                    
+                    // Sort by the order returned from search (relevance)
+                    self.searchResults = ids.compactMap { id in
+                        foundItems.first(where: { $0.vectorId == id })
+                    }
+                    
+                    self.isSearching = false
+                }
+            }
         }
     }
     
@@ -56,34 +167,28 @@ struct ClipboardListView: View {
         return allItems
     }
     
-    private func performSearch(query: String) {
-        guard !query.isEmpty else {
-            searchResults = []
-            isSearching = false
-            return
-        }
-        
-        isSearching = true
-        
+    // MARK: - Helper Methods
+    
+    private func performTransform(_ item: Item, instruction: String) {
         Task {
-            // 1. Perform semantic search
-            let results = await clippy.search(query: query, limit: 20)
-            
-            // 2. Map IDs back to Items
-            let ids = results.map { $0.0 }
-            
+            guard let result = await container.localAIService.transformText(text: item.content, instruction: instruction) else { return }
             await MainActor.run {
-                // Efficiently find items in current loaded list
-                // Note: For very large datasets, we might need a direct fetch by ID
-                let foundItems = allItems.filter { ids.contains($0.vectorId ?? UUID()) }
-                
-                // Sort by the order returned from search (relevance)
-                self.searchResults = ids.compactMap { id in
-                    foundItems.first(where: { $0.vectorId == id })
-                }
-                
-                self.isSearching = false
+                ClipboardService.shared.copyTextToClipboard(result)
             }
+        }
+    }
+    
+    private func copyToClipboard(_ item: Item) {
+        ClipboardService.shared.copyTextToClipboard(item.content)
+    }
+    
+    private func deleteItem(_ item: Item) {
+        modelContext.delete(item)
+        // Note: For complete consistency, we should also delete from Vector DB using ClipboardRepository if available,
+        // but modelContext deletion is propagated via NotificationCenter if setup, or we rely on next app launch sync.
+        // For now, this suffices for UI.
+        Task {
+             try? await container.clippy.deleteDocument(vectorId: item.vectorId ?? UUID())
         }
     }
 }
@@ -114,6 +219,7 @@ struct ClipboardItemRow: View {
                 }
             }
             
+
             VStack(alignment: .leading, spacing: 4) {
                 // Main Content Preview
                 Text(item.title ?? item.content)
@@ -137,6 +243,26 @@ struct ClipboardItemRow: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
+                }
+                
+                // Action Buttons (Dynamic)
+                if !actions.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(actions, id: \.self) { action in
+                            Button(action: { action.perform() }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: action.iconName)
+                                    Text(action.label)
+                                }
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.blue)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
                 
                 // Tags
@@ -164,7 +290,20 @@ struct ClipboardItemRow: View {
             }
         }
         .padding(.vertical, 8)
+        .onAppear {
+            // Lazy detection
+            if actions.isEmpty && item.contentType == "text" {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let detected = ActionDetector.shared.detectActions(in: item.content)
+                    DispatchQueue.main.async {
+                        self.actions = detected
+                    }
+                }
+            }
+        }
     }
+    
+    @State private var actions: [ClipboardAction] = []
     
     private func timeAgo(from date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()

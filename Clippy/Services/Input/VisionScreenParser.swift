@@ -109,10 +109,7 @@ class VisionScreenParser: ObservableObject {
     // MARK: - Screen Capture
     
     private func captureScreen() -> NSImage? {
-        guard NSScreen.main != nil else {
-
-            return nil
-        }
+        guard NSScreen.main != nil else { return nil }
         
 
         
@@ -120,7 +117,6 @@ class VisionScreenParser: ObservableObject {
         if #available(macOS 12.3, *) {
             return captureWithScreenCaptureKit()
         } else {
-
             return nil
         }
     }
@@ -136,7 +132,6 @@ class VisionScreenParser: ObservableObject {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 
                 guard let display = content.displays.first else {
-
                     semaphore.signal()
                     return
                 }
@@ -156,13 +151,10 @@ class VisionScreenParser: ObservableObject {
                     contentFilter: filter,
                     configuration: config
                 )
-                
-
-                
-                resultImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                                resultImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
                 
             } catch {
-
+                print("❌ [VisionScreenParser] Screen capture error: \(error)")
             }
             
             semaphore.signal()
@@ -171,7 +163,7 @@ class VisionScreenParser: ObservableObject {
         // Wait for capture to complete (with timeout)
         let result = semaphore.wait(timeout: .now() + 10.0)
         if result == .timedOut {
-
+            print("❌ [VisionScreenParser] Screen capture timed out")
         }
         
         return resultImage

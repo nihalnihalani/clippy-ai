@@ -4,7 +4,7 @@ import SwiftData
 struct ClipboardDetailView: View {
     @Bindable var item: Item
     @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject var clippy: Clippy
+    @EnvironmentObject var container: AppDependencyContainer
     @State private var newTagInput: String = ""
     @State private var isEditingTags: Bool = false
     @State private var showCopiedFeedback: Bool = false
@@ -196,7 +196,10 @@ struct ClipboardDetailView: View {
     }
     
     private func deleteItem() {
-        ClipboardService.shared.deleteItem(item, modelContext: modelContext, clippy: clippy)
+        guard let repository = container.repository else { return }
+        Task {
+            try? await repository.deleteItem(item)
+        }
     }
     
     private func addTag() {

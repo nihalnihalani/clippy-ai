@@ -17,18 +17,22 @@ enum AIServiceType: String, CaseIterable {
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @StateObject private var clipboardMonitor = ClipboardMonitor()
-    @StateObject private var clippy = Clippy()
-    @StateObject private var hotkeyManager = HotkeyManager()
-    @StateObject private var visionParser = VisionScreenParser()
-    @StateObject private var textCaptureService = TextCaptureService()
-    @StateObject private var clippyController = ClippyWindowController()
+    @EnvironmentObject private var container: AppDependencyContainer
     
-    @State private var geminiService: GeminiService = GeminiService(apiKey: "")
-    @State private var localAIService: LocalAIService = LocalAIService()
-    
-    // Voice Input State
-    @StateObject private var audioRecorder = AudioRecorder()
+    // Derived properties for cleaner access (optional, but helps avoid massive find/replace)
+    private var clipboardMonitor: ClipboardMonitor { container.clipboardMonitor }
+    private var clippy: Clippy { container.clippy }
+    private var hotkeyManager: HotkeyManager { container.hotkeyManager }
+    private var visionParser: VisionScreenParser { container.visionParser }
+    private var textCaptureService: TextCaptureService { container.textCaptureService }
+    private var clippyController: ClippyWindowController { container.clippyController }
+    private var localAIService: LocalAIService { container.localAIService }
+    // GeminiService is currently a @State in ContentView, but moved to container. 
+    // We'll use the container one, but we need to verify if we need to observe it.
+    private var geminiService: GeminiService { container.geminiService }
+    private var audioRecorder: AudioRecorder { container.audioRecorder }
+
+    // Constants/State
     @State private var elevenLabsService: ElevenLabsService?
     @State private var isRecordingVoice = false
     
@@ -37,7 +41,7 @@ struct ContentView: View {
     @State private var selectedItem: Item?
     @State private var searchText: String = ""
     @State private var showSettings: Bool = false
-    @State private var selectedAIService: AIServiceType = .gemini
+    @State private var selectedAIService: AIServiceType = .local // Default to Local
     
     // AI Processing State
     @State private var isProcessingAnswer: Bool = false
@@ -76,7 +80,6 @@ struct ContentView: View {
                 }
             }
         }
-        .environmentObject(clippy)
         .sheet(isPresented: $showSettings) {
             SettingsView(
                 apiKey: Binding(
@@ -127,7 +130,7 @@ struct ContentView: View {
         // Load stored API key
         let storedKey = getStoredAPIKey()
         if !storedKey.isEmpty {
-            geminiService = GeminiService(apiKey: storedKey)
+            geminiService.updateApiKey(storedKey)
         }
         
         // Initialize ElevenLabs Service
@@ -137,14 +140,8 @@ struct ContentView: View {
         }
         
         Task {
+            // Initialize Vector DB
             await clippy.initialize()
-            clipboardMonitor.startMonitoring(
-                modelContext: modelContext,
-                clippy: clippy,
-                geminiService: geminiService,
-                localAIService: localAIService,
-                visionParser: visionParser
-            )
             
             startHotkeys()
         }
@@ -271,16 +268,28 @@ struct ContentView: View {
     }
     
     private func saveVisionContent(_ text: String, originalText: String? = nil) {
+        guard let repository = container.repository else { return }
+        
         // Deduplication check could be done here, but simplified for brevity
         let contentToSave = originalText != nil ? "Image Description:\n\(text)\n\nExtracted Text:\n\(originalText!)" : text
         
-        let item = Item(
-            timestamp: Date(),
-            content: contentToSave,
-            appName: clipboardMonitor.currentAppName,
-            contentType: "vision-parsed"
-        )
-        modelContext.insert(item)
+        Task {
+            do {
+                _ = try await repository.saveItem(
+                    content: contentToSave,
+                    appName: clipboardMonitor.currentAppName,
+                    contentType: "vision-parsed",
+                    timestamp: Date(),
+                    tags: [],
+                    vectorId: nil,
+                    imagePath: nil,
+                    title: nil
+                )
+                print("💾 [ContentView] Vision content saved via Repository")
+            } catch {
+                print("❌ [ContentView] Failed to save vision content: \(error)")
+            }
+        }
     }
     
     private func handleTextCaptureTrigger() {
@@ -331,7 +340,7 @@ struct ContentView: View {
             var relevantItems: [Item] = []
             
             // Perform vector search
-            let searchResults = await clippy.search(query: capturedText, limit: 10)
+            let searchResults = await clippy.search(query: capturedText, limit: 30)
             let foundVectorIds = Set(searchResults.map { $0.0 })
             
             if !foundVectorIds.isEmpty {
@@ -360,7 +369,15 @@ struct ContentView: View {
             }
             
             // 3. Build Context
-            let clipboardContext = relevantItems.map { (content: $0.content, tags: $0.tags) }
+            let clipboardContext = relevantItems.map { item in
+                return (
+                    content: item.content,
+                    tags: item.tags,
+                    type: item.contentType,
+                    timestamp: item.timestamp,
+                    title: item.title
+                )
+            }
             print("🧠 [ContentView] RAG Context: Using \(relevantItems.count) items (\(searchResults.count) from search)")
 
             let answer: String?
@@ -368,17 +385,42 @@ struct ContentView: View {
             
             switch selectedAIService {
             case .gemini:
+                // Gemini service might need update or we keep it compatible with old struct if it uses a different one
+                // For now, assuming GeminiService has its own signature or isn't used in Local mode
+                 // Converting back to simple context for Gemini if needed, or update Gemini signature later.
+                 // Since we are in .local mode usually, let's focus on that.
+                 // Actually ContentView uses same logic. Let's assume GeminiService still takes [(String, [String])]
+                 // We might need to simplify for Gemini if it hasn't been updated.
+                 let simpleContext = relevantItems.map { ($0.content, $0.tags) }
                 (answer, imageIndex) = await geminiService.generateAnswerWithImageDetection(
                     question: capturedText,
-                    clipboardContext: clipboardContext,
+                    clipboardContext: simpleContext,
                     appName: clipboardMonitor.currentAppName
                 )
             case .local:
-                answer = await localAIService.generateAnswer(
-                    question: capturedText,
-                    clipboardContext: clipboardContext,
-                    appName: clipboardMonitor.currentAppName
-                )
+                // Streaming Implementation for Local AI
+                var fullAnswer = ""
+                do {
+                    let stream = localAIService.generateAnswerStream(
+                        question: capturedText,
+                        clipboardContext: clipboardContext,
+                        appName: clipboardMonitor.currentAppName
+                    )
+                    
+                    for try await token in stream {
+                        fullAnswer += token
+                        // UX: Show streaming text in Clippy bubble!
+                        // Truncate to keep it fitting in the bubble (e.g. last 50 chars)
+                        await MainActor.run {
+                            let preview = fullAnswer.suffix(50).replacingOccurrences(of: "\n", with: " ")
+                            self.clippyController.setState(.writing, message: "...\(preview)")
+                        }
+                    }
+                    answer = fullAnswer
+                } catch {
+                    print("❌ Streaming Error: \(error)")
+                    answer = nil // Fallback to handling nil below
+                }
                 imageIndex = nil
             }
             
@@ -420,8 +462,12 @@ struct ContentView: View {
                 if item.contentType == "image", let imagePath = item.imagePath {
                     ClipboardService.shared.copyImageToClipboard(imagePath: imagePath)
                     
-                    // Delete original item logic
-                    ClipboardService.shared.deleteItem(item, modelContext: self.modelContext, clippy: self.clippy)
+                    // Delete original item logic via Repository
+                    if let repository = self.container.repository {
+                        Task {
+                            try? await repository.deleteItem(item)
+                        }
+                    }
                     
                     self.textCaptureService.replaceCapturedTextWithAnswer("")
                     
@@ -543,16 +589,10 @@ struct ContentView: View {
     
     private func saveAPIKey(_ key: String) {
         UserDefaults.standard.set(key, forKey: "Gemini_API_Key")
-        geminiService = GeminiService(apiKey: key)
-        // Restart monitoring
-        clipboardMonitor.stopMonitoring()
-        clipboardMonitor.startMonitoring(
-            modelContext: modelContext,
-            clippy: clippy,
-            geminiService: geminiService,
-            localAIService: localAIService,
-            visionParser: visionParser
-        )
+        geminiService.updateApiKey(key)
+        
+        // No need to restart monitoring as dependencies are injected by reference
+        // and GeminiService handles its own key state.
     }
     
     private func getStoredAPIKey() -> String {

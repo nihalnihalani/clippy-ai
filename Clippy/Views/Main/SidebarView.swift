@@ -21,7 +21,7 @@ struct SidebarView: View {
     @ObservedObject var clippyController: ClippyWindowController
     @Binding var showSettings: Bool
     @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject var clippy: Clippy
+    @EnvironmentObject var container: AppDependencyContainer
     @State private var showClearConfirmation: Bool = false
     
     var body: some View {
@@ -102,17 +102,29 @@ struct SidebarView: View {
                 
                 Divider()
                 
-                // Clear History Button
-                Button(role: .destructive, action: { showClearConfirmation = true }) {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("Clear All History")
+                // Maintenance Section
+                VStack(spacing: 8) {
+                    Button(action: reindexSearch) {
+                        HStack {
+                            Image(systemName: "arrow.clockwise.circle")
+                            Text("Re-index Search")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .buttonStyle(.bordered)
+                    
+                    Button(role: .destructive, action: { showClearConfirmation = true }) {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Clear All History")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
                 }
-                .buttonStyle(.bordered)
-                .tint(.red)
             }
             .padding(20)
             .background(.ultraThinMaterial)
@@ -132,29 +144,48 @@ struct SidebarView: View {
     }
     
     private func clearAllHistory() {
-        // Fetch all items and delete them
-        do {
-            let descriptor = FetchDescriptor<Item>()
-            let items = try modelContext.fetch(descriptor)
-            
-            for item in items {
-                // Delete associated image files
-                if let imagePath = item.imagePath {
-                    try? FileManager.default.removeItem(atPath: imagePath)
+        guard let repository = container.repository else { return }
+        
+        Task {
+            do {
+                // Fetch all items and delete them
+                let descriptor = FetchDescriptor<Item>()
+                let items = try modelContext.fetch(descriptor)
+                
+                for item in items {
+                    // Use repository to ensure consistent deletion (Files + Vector + Data)
+                    try await repository.deleteItem(item)
                 }
                 
-                // Delete vector embedding if exists
-                if let vectorId = item.vectorId {
-                    clippy.deleteDocument(vectorId: vectorId)
-                }
-                
-                modelContext.delete(item)
+                print("🗑️ [SidebarView] Cleared all \(items.count) clipboard items")
+            } catch {
+                print("❌ [SidebarView] Failed to clear history: \(error)")
             }
-            
-            try modelContext.save()
-            print("🗑️ [SidebarView] Cleared all \(items.count) clipboard items")
-        } catch {
-            print("❌ [SidebarView] Failed to clear history: \(error)")
+        }
+    }
+    
+    private func reindexSearch() {
+        Task {
+            do {
+                print("🔄 [SidebarView] Starting re-indexing...")
+                let descriptor = FetchDescriptor<Item>()
+                let items = try modelContext.fetch(descriptor)
+                
+                let documents = items.compactMap { item -> (UUID, String)? in
+                    guard let vid = item.vectorId else { return nil }
+                    let embeddingText = (item.title != nil && !item.title!.isEmpty) ? "\(item.title!)\n\n\(item.content)" : item.content
+                    return (vid, embeddingText)
+                }
+                
+                if !documents.isEmpty {
+                    await container.clippy.addDocuments(items: documents)
+                    print("✅ [SidebarView] Re-indexed \(documents.count) items")
+                } else {
+                    print("⚠️ [SidebarView] No items to re-index")
+                }
+            } catch {
+                print("❌ [SidebarView] Failed to re-index: \(error)")
+            }
         }
     }
 }
@@ -183,4 +214,3 @@ struct KeyboardShortcutHint: View {
         }
     }
 }
-

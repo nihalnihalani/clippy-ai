@@ -37,13 +37,7 @@ class ClipboardService {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
     }
-    
-    @MainActor
-    func deleteItem(_ item: Item, modelContext: ModelContext, clippy: Clippy) {
-        if let vid = item.vectorId {
-            clippy.deleteDocument(vectorId: vid)
-        }
-        modelContext.delete(item)
-    }
 }
+    
+
 
