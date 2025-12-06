@@ -1,138 +1,107 @@
 import Foundation
+import MLXLLM
+import MLXLMCommon
+import MLX
 
-// Local AI API Response Structure
-struct LocalAIResponse: Codable {
-    let id: String?
-    let object: String?
-    let created: Int?
-    let model: String?
-    let choices: [Choice]?
-    let usage: Usage?
-    
-    struct Choice: Codable {
-        let index: Int?
-        let message: Message?
-        let delta: Delta?
-        let finishReason: String?
-        
-        enum CodingKeys: String, CodingKey {
-            case index, message, delta
-            case finishReason = "finish_reason"
-        }
-    }
-    
-    struct Message: Codable {
-        let role: String?
-        let content: String?
-    }
-    
-    struct Delta: Codable {
-        let role: String?
-        let content: String?
-    }
-    
-    struct Usage: Codable {
-        let promptTokens: Int?
-        let completionTokens: Int?
-        let totalTokens: Int?
-        
-        enum CodingKeys: String, CodingKey {
-            case promptTokens = "prompt_tokens"
-            case completionTokens = "completion_tokens"
-            case totalTokens = "total_tokens"
-        }
-    }
-}
-
+/// Native Local AI Service using MLX-Swift for in-process LLM inference.
+/// No external Python servers required - runs entirely on Apple Silicon.
 @MainActor
 class LocalAIService: ObservableObject, AIServiceProtocol {
     @Published var isProcessing = false
     @Published var lastError: String?
+    @Published var isModelLoaded = false
+    @Published var loadingProgress: Double = 0.0
+    @Published var statusMessage: String = "Not loaded"
     
-    // Endpoints configuration
-    private let visionEndpoint = "http://localhost:8081/chat/completions"
-    private let ragEndpoint = "http://localhost:8082/v1/chat/completions"
-    private let extractEndpoint = "http://localhost:8083/v1/chat/completions"
+    // Model container for LLM
+    private var modelContainer: ModelContainer?
     
-    // Models configuration
-    private let visionModel = "mlx-community/LFM2-VL-3B-4bit"
-    private let ragModel = "LiquidAI/LFM2-1.2B-RAG"
-    private let extractModel = "LiquidAI/LFM2-1.2B-Extract"
-
+    // Model configuration - using smaller model for Mac
+    private let modelId = "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
+    
     init() {}
-
-    // MARK: - Vision (LFM2-VL-3B)
-
-    /// Generate a description for an image using LFM2-VL-3B
-    func generateVisionDescription(base64Image: String, screenText: String? = nil) async -> String? {
-        print("👁️ [LocalAIService] Generating vision description...")
-        isProcessing = true
-        defer { isProcessing = false }
-        
-        var prompt = """
-        Analyze this screen content in high detail for future reference.
-        """
-        
-        if let text = screenText, !text.isEmpty {
-            prompt += "\n\nCONTEXT FROM SCREEN TEXT (Use this to verify details/code/filenames):\n\(text.prefix(2000))\n"
+    
+    // MARK: - Model Loading
+    
+    /// Load the LLM model into memory
+    func loadModel() async {
+        guard modelContainer == nil else {
+            print("✅ [LocalAIService] Model already loaded")
+            return
         }
         
-        prompt += """
+        print("🔄 [LocalAIService] Loading model: \(modelId)")
+        statusMessage = "Downloading model..."
+        isProcessing = true
         
-        STRICT OUTPUT FORMAT:
-        Title: [Action/Topic] - [Key Subject]
-        Files/Context:
-        1. [File 1]
-        2. [File 2]
-        (List MAX 5 distinct files. STOP after 5.)
-
-        Code:
-        - [Description of visible code]
-        - [Key variables/functions]
-
-        Terminal:
-        - [Last command]
-        - [Output summary]
-
-        Intent:
-        - [User's likely goal]
-
-        CONSTRAINTS:
-        - OUTPUT MUST START DIRECTLY WITH "Title:".
-        - DO NOT WRITE ANY PREAMBLE OR CONVERSATIONAL TEXT (e.g., "Here is the analysis...").
-        - Files/Context: Max 5 items. ABSOLUTELY NO REPETITION.
-        - Code/Terminal/Intent: Use bullet points.
-        - STOP generating if you start repeating.
-        """
+        do {
+            // Use LLMModelFactory to load the model
+            modelContainer = try await LLMModelFactory.shared.loadContainer(
+                configuration: LLMRegistry.qwen2_5_1_5b
+            ) { progress in
+                Task { @MainActor in
+                    self.loadingProgress = progress.fractionCompleted
+                    if progress.fractionCompleted < 1.0 {
+                        self.statusMessage = "Loading: \(Int(progress.fractionCompleted * 100))%"
+                    }
+                }
+            }
+            
+            isModelLoaded = true
+            statusMessage = "Ready (Qwen2.5-1.5B)"
+            print("✅ [LocalAIService] Model loaded successfully")
+            
+        } catch {
+            print("❌ [LocalAIService] Failed to load model: \(error)")
+            lastError = error.localizedDescription
+            statusMessage = "Failed: \(error.localizedDescription)"
+        }
         
-        // Custom format for our vision server
-        let requestBody: [String: Any] = [
-            "model": visionModel,
-            "messages": [
-                [
-                    "role": "user",
-                    "content": [
-                        ["type": "text", "text": prompt],
-                        ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(base64Image)"]]
-                    ]
-                ]
-            ],
-            "max_tokens": 1024,
-            "temperature": 0.7
-        ]
-        
-        return await makeRequest(endpoint: visionEndpoint, body: requestBody, extractField: "content")
+        isProcessing = false
     }
     
-    /// Protocol conformance: Analyze image data and return description
-    func analyzeImage(imageData: Data) async -> String? {
-        let base64Image = imageData.base64EncodedString()
-        return await generateVisionDescription(base64Image: base64Image)
+    // MARK: - Text Generation
+    
+    /// Generate text completion from a prompt
+    private func generate(prompt: String, maxTokens: Int = 512) async -> String? {
+        guard let container = modelContainer else {
+            print("⚠️ [LocalAIService] Model not loaded, loading now...")
+            await loadModel()
+            guard let container = modelContainer else { return nil }
+            return await generateWithContainer(container, prompt: prompt, maxTokens: maxTokens)
+        }
+        
+        return await generateWithContainer(container, prompt: prompt, maxTokens: maxTokens)
     }
     
-    // MARK: - RAG (LFM2-1.2B-RAG)
+    private func generateWithContainer(_ container: ModelContainer, prompt: String, maxTokens: Int) async -> String? {
+        do {
+            let result = try await container.perform { context in
+                let input = try await context.processor.prepare(input: .init(prompt: prompt))
+                return try MLXLMCommon.generate(
+                    input: input,
+                    parameters: .init(temperature: 0.3, topP: 0.9),
+                    context: context
+                ) { tokens in
+                    if tokens.count >= maxTokens {
+                        return .stop
+                    }
+                    return .more
+                }
+            }
+            
+            return result.output
+            
+        } catch {
+            print("❌ [LocalAIService] Generation error: \(error)")
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
     
-    /// Generate an answer based on user question and clipboard context using LFM2-1.2B-RAG
+    // MARK: - AIServiceProtocol Implementation
+    
+    /// Generate an answer based on user question and clipboard context
     func generateAnswer(
         question: String,
         clipboardContext: [RAGContextItem],
@@ -144,29 +113,24 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
         
         let contextText = buildContextString(clipboardContext)
         let prompt = """
-        <context>
+        <|im_start|>system
+        You are a helpful assistant that answers questions based on the user's clipboard history.
+        <|im_end|>
+        <|im_start|>user
+        Context from clipboard history:
         \(contextText)
-        </context>
         
         Question: \(question)
         
         Instructions:
-        1. Answer the Question accurately based on the <context>.
-        2. If the answer is NOT in the <context>, reply with "I couldn't find that information in your clipboard history."
-        
-        Answer:
+        1. Answer the question using ONLY information from the context above.
+        2. If the answer is not in the context, say "I couldn't find that in your clipboard history."
+        3. Be concise and direct.
+        <|im_end|>
+        <|im_start|>assistant
         """
         
-        let requestBody: [String: Any] = [
-            "model": ragModel,
-            "messages": [
-                ["role": "user", "content": prompt]
-            ],
-            "max_tokens": 256,
-            "temperature": 0.3
-        ]
-        
-        return await makeRequest(endpoint: ragEndpoint, body: requestBody, extractField: "content")
+        return await generate(prompt: prompt, maxTokens: 256)
     }
 
     /// Generate a streaming answer
@@ -175,212 +139,124 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
         clipboardContext: [RAGContextItem],
         appName: String?
     ) -> AsyncThrowingStream<String, Error> {
-        print("🤖 [LocalAIService] Generating Streaming RAG answer...")
-        // Note: isProcessing isn't easily toggleable here since it returns immediately.
-        // The consumer should handle loading state.
+        print("🤖 [LocalAIService] Generating Streaming answer...")
         
-        let contextText = buildContextString(clipboardContext) // Uses default safe limit (10k)
+        let contextText = buildContextString(clipboardContext)
         let prompt = """
-        <context>
+        <|im_start|>system
+        You are a helpful assistant that answers questions based on the user's clipboard history.
+        <|im_end|>
+        <|im_start|>user
+        Context from clipboard history:
         \(contextText)
-        </context>
         
         Question: \(question)
         
         Instructions:
-        1. Answer the Question using ONLY the information provided in the <context>.
-        2. If the answer is in the <context>, provide it exactly.
-        3. If the answer is NOT in the <context>, reply with "I couldn't find that information in your clipboard history."
-        
-        Answer:
+        1. Answer the question using ONLY information from the context above.
+        2. If the answer is not in the context, say "I couldn't find that in your clipboard history."
+        3. Be concise and direct.
+        <|im_end|>
+        <|im_start|>assistant
         """
-        
-        print("📝 [LocalAIService] RAG Prompt Preview:\n\(prompt.prefix(200))...")
-        
-        let requestBody: [String: Any] = [
-            "model": ragModel,
-            "messages": [
-                ["role": "user", "content": prompt]
-            ],
-            "max_tokens": 512,
-            "temperature": 0.3
-        ]
-        
-        // We need to call actor synchronously to get the stream object, 
-        // but actor calls are async.
-        // AsyncThrowingStream init can wrap the async call.
         
         return AsyncThrowingStream { continuation in
             Task {
-                let stream = await AIActor.shared.makeRequestStream(endpoint: ragEndpoint, body: requestBody, apiKey: nil)
-                for try await token in stream {
-                    continuation.yield(token)
+                if let response = await self.generate(prompt: prompt, maxTokens: 512) {
+                    let words = response.components(separatedBy: " ")
+                    for word in words {
+                        continuation.yield(word + " ")
+                        try? await Task.sleep(nanoseconds: 10_000_000)
+                    }
                 }
                 continuation.finish()
             }
         }
     }
     
-    // MARK: - Extract (LFM2-1.2B-Extract)
-    
-    /// Extract structured data from text using LFM2-1.2B-Extract
-    func extractStructuredData(text: String, schema: String) async -> String? {
-        print("⛏️ [LocalAIService] Extracting data...")
-        isProcessing = true
-        defer { isProcessing = false }
-        
-        let prompt = "Extract the following information from the text. Return ONLY the requested data in the specified format. No conversational text.\nText: \"\(text)\"\nSchema: \(schema)"
-        
-        let requestBody: [String: Any] = [
-            "model": extractModel,
-            "messages": [
-                ["role": "user", "content": prompt]
-            ],
-            "max_tokens": 512,
-            "temperature": 0.1
-        ]
-        
-        return await makeRequest(endpoint: extractEndpoint, body: requestBody, extractField: "content")
-    }
-    
-    // MARK: - Transform (LFM2-1.2B-RAG)
-    
-    /// Transform text based on an instruction
-    func transformText(text: String, instruction: String) async -> String? {
-        print("🪄 [LocalAIService] Transforming text...")
-        isProcessing = true
-        defer { isProcessing = false }
-        
-        // Truncate input if necessary
-        let safeText = String(text.prefix(3000))
-        
+    /// Generate tags for content
+    func generateTags(content: String, appName: String?, context: String?) async -> [String] {
         let prompt = """
-        Instruction: \(instruction)
+        <|im_start|>system
+        You are a tagging assistant. Generate 3-5 relevant tags for the given content.
+        <|im_end|>
+        <|im_start|>user
+        Generate tags for this text. Return ONLY a comma-separated list of tags, nothing else.
         
-        Input Text:
-        \(safeText)
-        
-        Output:
+        Text: "\(content.prefix(500))"
+        <|im_end|>
+        <|im_start|>assistant
         """
         
-        let requestBody: [String: Any] = [
-            "model": ragModel, // Reuse RAG model for general instructions
-            "messages": [
-                ["role": "user", "content": prompt]
-            ],
-            "max_tokens": 1024,
-            "temperature": 0.2
-        ]
+        guard let response = await generate(prompt: prompt, maxTokens: 50) else {
+            return []
+        }
         
-        return await makeRequest(endpoint: ragEndpoint, body: requestBody, extractField: "content")
+        let tags = response
+            .components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count < 30 }
+            .prefix(5)
+        
+        return Array(tags)
+    }
+    
+    /// Analyze image - placeholder (would need MLXVLM)
+    func analyzeImage(imageData: Data) async -> String? {
+        print("⚠️ [LocalAIService] Vision not implemented in pure Swift mode")
+        return "Image analysis requires vision model"
+    }
+    
+    /// Vision description - placeholder
+    func generateVisionDescription(base64Image: String, screenText: String? = nil) async -> String? {
+        return screenText ?? "Image analysis requires vision model"
+    }
+    
+    /// Transform text based on an instruction (for context menu actions)
+    func transformText(text: String, instruction: String) async -> String? {
+        let prompt = """
+        <|im_start|>system
+        You are a text transformation assistant. Apply the user's instruction to transform the text.
+        <|im_end|>
+        <|im_start|>user
+        Instruction: \(instruction)
+        
+        Text to transform:
+        \(text.prefix(2000))
+        
+        Output ONLY the transformed text, nothing else.
+        <|im_end|>
+        <|im_start|>assistant
+        """
+        
+        return await generate(prompt: prompt, maxTokens: 512)
     }
     
     // MARK: - Helper Methods
     
-    private func buildContextString(_ clipboardContext: [RAGContextItem], maxLength: Int = 10000) -> String {
+    private func buildContextString(_ clipboardContext: [RAGContextItem], maxLength: Int = 5000) -> String {
         if clipboardContext.isEmpty { return "No context available." }
         
-        let now = Date()
         let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
+        formatter.unitsStyle = .short
+        let now = Date()
         
-        var currentLength = 0
-        var builtString = ""
+        var result = ""
         
-        for (index, item) in clipboardContext.enumerated() {
+        for (index, item) in clipboardContext.prefix(10).enumerated() {
             let timeString = formatter.localizedString(for: item.timestamp, relativeTo: now)
-            var metaParts: [String] = []
+            var entry = "[\(index + 1)] (\(timeString)) "
             
-            // Type & Time
-            metaParts.append("[Type: \(item.type)]")
-            metaParts.append("[Time: \(timeString)]")
-            
-            // Title
             if let title = item.title, !title.isEmpty {
-                metaParts.append("[Title: \(title)]")
+                entry += "[\(title)] "
             }
             
-            // Tags
-            if !item.tags.isEmpty {
-                metaParts.append("[Tags: \(item.tags.joined(separator: ", "))]")
-            }
+            entry += String(item.content.prefix(500))
+            result += entry + "\n\n"
             
-            let metaLine = metaParts.joined(separator: " ")
-            let itemString = "[\(index + 1)] \(metaLine)\n\(item.content)"
-            
-            // Check length limit
-            if currentLength + itemString.count > maxLength {
-                builtString += "\n\n... (Context truncated)"
-                break
-            }
-            
-            if !builtString.isEmpty {
-                builtString += "\n\n---\n\n"
-            }
-            builtString += itemString
-            currentLength += builtString.count
+            if result.count > maxLength { break }
         }
         
-        return builtString
-    }
-    
-    private func makeRequest(endpoint: String, body: [String: Any], extractField: String) async -> String? {
-        do {
-            // Offload networking and parsing to background actor
-            let result = try await AIActor.shared.makeRequest(endpoint: endpoint, body: body, apiKey: nil)
-            return result
-        } catch {
-            print("❌ [LocalAIService] Request failed: \(error.localizedDescription)")
-            // Update UI state on Main Actor
-            self.lastError = error.localizedDescription
-            return nil
-        }
-    }
-    
-    /// Compatibility method for existing code (Tagging) - uses RAG model for now
-    func generateTags(content: String, appName: String?, context: String?) async -> [String] {
-        // Simple implementation using RAG model for tagging
-        let prompt = """
-        Analyze this text and generate 3-5 concise keywords/tags.
-        Rules:
-        1. Return ONLY a comma-separated list (e.g. "Tag1, Tag2, Tag3").
-        2. Do NOT use numbered lists.
-        3. Do NOT write full sentences or introductions like "Here are the tags".
-        
-        Text: "\(content.prefix(500))"
-        """
-        
-        guard let response = await generateAnswer(question: prompt, clipboardContext: [], appName: appName) else {
-            return []
-        }
-        
-        // Robust cleaning and parsing
-        var cleanResponse = response
-        
-        // Remove common conversational prefixes
-        let prefixesToRemove = ["Here are", "The tags are", "Keywords:", "Tags:"]
-        for prefix in prefixesToRemove {
-            if let range = cleanResponse.range(of: prefix, options: .caseInsensitive) {
-                cleanResponse.removeSubrange(cleanResponse.startIndex..<range.upperBound)
-            }
-        }
-        
-        // Split by newlines or commas
-        let separators = CharacterSet(charactersIn: ",\n")
-        let rawTags = cleanResponse.components(separatedBy: separators)
-        
-        let tags = rawTags.compactMap { rawTag -> String? in
-            // Clean up each tag (remove "1.", "- ", etc.)
-            let trimmed = rawTag.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleaned = trimmed
-                .replacingOccurrences(of: "^[0-9]+\\.", with: "", options: .regularExpression) // Remove "1."
-                .replacingOccurrences(of: "^- ", with: "", options: .regularExpression)        // Remove "- "
-                .replacingOccurrences(of: "^• ", with: "", options: .regularExpression)        // Remove "• "
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            return cleaned.isEmpty ? nil : cleaned
-        }
-        
-        return Array(Set(tags)).prefix(5).sorted() // Dedupe and limit
+        return result
     }
 }

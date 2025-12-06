@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		7CD28A0F2E9651760075A000 /* VecturaKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7CD28A0E2E9651760075A000 /* VecturaKit */; };
 		7CD28A112E9651760075A000 /* VecturaMLXKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7CD28A102E9651760075A000 /* VecturaMLXKit */; };
+		7CMLX00012E9700000000001 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 7CMLX00022E9700000000001 /* MLXLLM */; };
+		7CMLX00032E9700000000001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 7CMLX00042E9700000000001 /* MLXLMCommon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +32,8 @@
 			files = (
 				7CD28A112E9651760075A000 /* VecturaMLXKit in Frameworks */,
 				7CD28A0F2E9651760075A000 /* VecturaKit in Frameworks */,
+				7CMLX00012E9700000000001 /* MLXLLM in Frameworks */,
+				7CMLX00032E9700000000001 /* MLXLMCommon in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -74,6 +78,8 @@
 			packageProductDependencies = (
 				7CD28A0E2E9651760075A000 /* VecturaKit */,
 				7CD28A102E9651760075A000 /* VecturaMLXKit */,
+				7CMLX00022E9700000000001 /* MLXLLM */,
+				7CMLX00042E9700000000001 /* MLXLMCommon */,
 			);
 			productName = Clippy;
 			productReference = 7C1ADD162E962B920014E10D /* Clippy.app */;
@@ -105,6 +111,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7CD28A0D2E9651760075A000 /* XCRemoteSwiftPackageReference "VecturaKit" */,
+				7CMLX00052E9700000000001 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7C1ADD172E962B920014E10D /* Products */;
@@ -351,6 +358,14 @@
 				kind = branch;
 			};
 		};
+		7CMLX00052E9700000000001 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -363,6 +378,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 7CD28A0D2E9651760075A000 /* XCRemoteSwiftPackageReference "VecturaKit" */;
 			productName = VecturaMLXKit;
+		};
+		7CMLX00022E9700000000001 /* MLXLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7CMLX00052E9700000000001 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLLM;
+		};
+		7CMLX00042E9700000000001 /* MLXLMCommon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7CMLX00052E9700000000001 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLMCommon;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
