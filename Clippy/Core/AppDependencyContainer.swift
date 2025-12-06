@@ -6,6 +6,7 @@ class AppDependencyContainer: ObservableObject {
     // Core Services
     let clippy: Clippy
     let clipboardMonitor: ClipboardMonitor
+    let contextEngine: ContextEngine
     let visionParser: VisionScreenParser
     let hotkeyManager: HotkeyManager
     let textCaptureService: TextCaptureService
@@ -39,6 +40,7 @@ class AppDependencyContainer: ObservableObject {
         
         // 1. Initialize Independent Services
         self.clippy = Clippy()
+        self.contextEngine = ContextEngine()
         self.visionParser = VisionScreenParser()
         self.hotkeyManager = HotkeyManager()
         self.clippyController = ClippyWindowController()
@@ -63,9 +65,9 @@ class AppDependencyContainer: ObservableObject {
         if let repo = self.repository {
             clipboardMonitor.startMonitoring(
                 repository: repo,
+                contextEngine: contextEngine,
                 geminiService: geminiService,
-                localAIService: localAIService,
-                visionParser: visionParser
+                localAIService: localAIService
             )
         }
         
