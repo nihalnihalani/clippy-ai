@@ -144,18 +144,21 @@ struct ContentView: View {
         Task {
             // Initialize Vector DB
             await clippy.initialize()
-            
-            startHotkeys()
         }
+        
+        // Start hotkeys on main thread (required for CGEvent tap)
+        startHotkeys()
     }
     
     private func startHotkeys() {
+        print("⌨️ [ContentView] Starting hotkey listener...")
         hotkeyManager.startListening(
             onTrigger: { handleHotkeyTrigger() },
             onVisionTrigger: { handleVisionHotkeyTrigger() },
             onTextCaptureTrigger: { handleTextCaptureTrigger() },
             onVoiceCaptureTrigger: { toggleVoiceRecording() }
         )
+        print("⌨️ [ContentView] Hotkey listener started: \(hotkeyManager.isListening)")
     }
     
     // MARK: - Logic Handlers
