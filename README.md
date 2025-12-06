@@ -502,26 +502,30 @@ Result: Your text replaced with answer automatically!
 ## Project Structure
 
 ```
-clippy/
-├── Clippy/                          # Main app source
-│   ├── ClippyApp.swift             # App entry point
-│   ├── ContentView.swift           # Main UI
-│   ├── ClipboardMonitor.swift      # Core clipboard engine
-│   ├── SuggestionEngine.swift      # AI ranking algorithm
-│   ├── ClipboardService.swift      # CRUD operations
-│   ├── HotkeyManager.swift         # Global shortcuts
-│   ├── TextCaptureService.swift    # AI text replacement
-│   ├── FloatingDogWindowController.swift  # Clippy UI
-│   ├── VisionScreenParser.swift    # OCR & screen analysis
-│   ├── Clippy.swift                # Vector search (formerly EmbeddingService)
-
-│   ├── LocalAIService.swift        # Local AI (Qwen)
-│   ├── Item.swift                  # SwiftData model
-│   └── Resources/
-│       └── ClippyGifs/             # 23 animated GIFs
-├── Clippy.xcodeproj/               # Xcode project
-├── README.md                        # This file
-└── TECHNICAL_REPORT.md             # Build analysis
+Clippy/
+├── App/                    # Entry point
+│   ├── ClippyApp.swift
+│   └── AppDependencyContainer.swift
+├── Core/                   # Models & protocols
+│   ├── Models.swift
+│   ├── AIServiceProtocol.swift
+│   └── ClipboardRepository.swift
+├── Services/               # All business logic (flat)
+│   ├── ClipboardMonitor.swift
+│   ├── ContextEngine.swift
+│   ├── GeminiService.swift
+│   ├── LocalAIService.swift
+│   ├── HotkeyManager.swift
+│   ├── TextCaptureService.swift
+│   └── VisionScreenParser.swift
+├── UI/                     # Views (flat)
+│   ├── ContentView.swift
+│   ├── ClipboardListView.swift
+│   ├── ClipboardDetailView.swift
+│   └── SidebarView.swift
+├── ViewModels/             # MVVM
+│   └── SessionViewModel.swift
+└── Resources/              # GIF animations
 ```
 
 ---
