@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ApplicationServices
+import ImageIO
 
 class ClippyWindowController: ObservableObject {
     private var window: NSWindow?
@@ -368,3 +369,29 @@ class ClippyWindowController: ObservableObject {
     }
 }
 
+// MARK: - Clippy GIF Player
+
+struct ClippyGifPlayer: NSViewRepresentable {
+    let gifName: String
+    
+    func makeNSView(context: Context) -> NSImageView {
+        let imageView = NSImageView()
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.animates = true
+        return imageView
+    }
+    
+    func updateNSView(_ nsView: NSImageView, context: Context) {
+        if let url = Bundle.main.url(forResource: gifName, withExtension: "gif") {
+            if let image = NSImage(contentsOf: url) {
+                nsView.image = image
+                nsView.animates = true
+            }
+        } else if let url = Bundle.main.url(forResource: "ClippyGifs/\(gifName)", withExtension: "gif") {
+            if let image = NSImage(contentsOf: url) {
+                nsView.image = image
+                nsView.animates = true
+            }
+        }
+    }
+}

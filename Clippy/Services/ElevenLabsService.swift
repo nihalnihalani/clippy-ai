@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 class ElevenLabsService: ObservableObject {
     private let apiKey: String
@@ -80,3 +81,50 @@ class ElevenLabsService: ObservableObject {
     }
 }
 
+// MARK: - Audio Recorder
+
+class AudioRecorder: NSObject, ObservableObject {
+    private var audioRecorder: AVAudioRecorder?
+    @Published var isRecording = false
+    
+    func startRecording() -> URL? {
+        if #available(macOS 10.14, *) {
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized: break
+            case .notDetermined:
+                AVCaptureDevice.requestAccess(for: .audio) { _ in }
+            case .denied, .restricted: return nil
+            @unknown default: return nil
+            }
+        }
+
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("clippy_voice.m4a")
+        
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 12000,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+        
+        do {
+            audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
+            guard audioRecorder?.prepareToRecord() == true else { return nil }
+            
+            if audioRecorder?.record() == true {
+                isRecording = true
+                return fileURL
+            }
+            return nil
+        } catch {
+            return nil
+        }
+    }
+    
+    func stopRecording() -> URL? {
+        guard let recorder = audioRecorder, isRecording else { return nil }
+        recorder.stop()
+        isRecording = false
+        return recorder.url
+    }
+}
