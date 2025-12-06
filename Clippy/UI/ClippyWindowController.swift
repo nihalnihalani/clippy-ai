@@ -12,6 +12,25 @@ class ClippyWindowController: ObservableObject {
     @Published var currentState: ClippyAnimationState = .idle // Current animation state
     private var escapeKeyMonitor: Any? // Monitor for ESC key presses
     
+    // MARK: - Position Persistence
+    /// User's manually set position (saved to UserDefaults)
+    private var savedPosition: NSPoint? {
+        get {
+            let x = UserDefaults.standard.double(forKey: "ClippyWindowX")
+            let y = UserDefaults.standard.double(forKey: "ClippyWindowY")
+            // Return nil if never saved (both will be 0)
+            if x == 0 && y == 0 { return nil }
+            return NSPoint(x: x, y: y)
+        }
+        set {
+            if let point = newValue {
+                UserDefaults.standard.set(point.x, forKey: "ClippyWindowX")
+                UserDefaults.standard.set(point.y, forKey: "ClippyWindowY")
+            }
+        }
+    }
+    private var hasUserDraggedWindow = false
+    
     /// Set the current animation state and update the display
     func setState(_ state: ClippyAnimationState, message: String? = nil) {
         DispatchQueue.main.async {
@@ -27,15 +46,16 @@ class ClippyWindowController: ObservableObject {
                 self.createWindow()
             }
             
-            // Update the view content with new state - GLASS HUD DESIGN
+            // Update the view content with new state - VERTICAL LAYOUT (Clippy on top, bubble below)
             self.hostingController?.rootView = AnyView(
-                HStack(spacing: 12) {
-                    // Clippy GIF
+                VStack(spacing: 8) {
+                    // Clippy GIF (no background - transparent, allows drag-through)
                     ClippyGifPlayer(gifName: gifName)
                         .id(gifName)
                         .frame(width: 80, height: 60)
+                        .allowsHitTesting(false) // Allow mouse events to pass through for window dragging
                     
-                    // Message bubble (if any)
+                    // Message bubble (TRANSPARENT) - below Clippy
                     if !displayMessage.isEmpty || state == .thinking {
                         HStack(spacing: 8) {
                             if state == .thinking {
@@ -52,31 +72,23 @@ class ClippyWindowController: ObservableObject {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(.white.opacity(0.2), lineWidth: 1)
-                        )
+                        // Transparent background - no glass
                     }
                 }
-                .padding(12)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .shadow(color: .black.opacity(0.15), radius: 20, x: 0, y: 10)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(.white.opacity(0.3), lineWidth: 1)
-                )
+                .padding(8)
+                .background(Color.clear)
+                .contentShape(Rectangle()) // Makes entire area respond to drag
             )
             
-            // Position near text input if enabled (do this BEFORE showing)
-            // Only reposition if window is not already visible to allow user to drag it
+            // Position window (use saved position if user has dragged, otherwise auto-position)
             if !self.isVisible {
-                if self.followTextInput {
+                if let savedPos = self.savedPosition {
+                    // Use the user's saved position
+                    self.window?.setFrameOrigin(savedPos)
+                    print("📎 [ClippyWindowController] Restored saved position: \(savedPos)")
+                } else if self.followTextInput {
                     self.positionNearActiveTextInput()
                 } else {
-                    // Fallback to centered position
                     if let window = self.window {
                         self.positionWindowCentered(window)
                     }
@@ -155,7 +167,34 @@ class ClippyWindowController: ObservableObject {
         // Window is ready but not shown yet
         window.alphaValue = 1.0
         
+        // Observe window movements to save user's position
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidMove(_:)),
+            name: NSWindow.didMoveNotification,
+            object: window
+        )
+        
         print("📎 [ClippyWindowController] Window created and ready")
+    }
+    
+    /// Called when the user drags the window
+    @objc private func windowDidMove(_ notification: Notification) {
+        guard let window = window else { return }
+        savedPosition = window.frame.origin
+        hasUserDraggedWindow = true
+        print("📎 [ClippyWindowController] User moved window to: \(window.frame.origin)")
+    }
+    
+    /// Reset to auto-positioning (clears saved position)
+    func resetPosition() {
+        UserDefaults.standard.removeObject(forKey: "ClippyWindowX")
+        UserDefaults.standard.removeObject(forKey: "ClippyWindowY")
+        hasUserDraggedWindow = false
+        if let window = window {
+            positionWindowCentered(window)
+        }
+        print("📎 [ClippyWindowController] Position reset to default")
     }
     
     // MARK: - Public Methods
@@ -383,17 +422,24 @@ class ClippyWindowController: ObservableObject {
 
 // MARK: - Clippy GIF Player
 
+/// Custom NSImageView that ignores mouse events (allows window dragging)
+class DraggableImageView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil // Ignore all mouse events - pass through to window
+    }
+}
+
 struct ClippyGifPlayer: NSViewRepresentable {
     let gifName: String
     
-    func makeNSView(context: Context) -> NSImageView {
-        let imageView = NSImageView()
+    func makeNSView(context: Context) -> DraggableImageView {
+        let imageView = DraggableImageView()
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.animates = true
         return imageView
     }
     
-    func updateNSView(_ nsView: NSImageView, context: Context) {
+    func updateNSView(_ nsView: DraggableImageView, context: Context) {
         if let url = Bundle.main.url(forResource: gifName, withExtension: "gif") {
             if let image = NSImage(contentsOf: url) {
                 nsView.image = image
