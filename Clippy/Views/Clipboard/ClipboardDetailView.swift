@@ -8,6 +8,7 @@ struct ClipboardDetailView: View {
     @State private var newTagInput: String = ""
     @State private var isEditingTags: Bool = false
     @State private var showCopiedFeedback: Bool = false
+    @State private var selectedTag: String? = nil
     
     var body: some View {
         ScrollView {
@@ -100,23 +101,13 @@ struct ClipboardDetailView: View {
                     
                     FlowLayout(spacing: 8) {
                         ForEach(item.tags, id: \.self) { tag in
-                            HStack(spacing: 4) {
-                                Text(tag)
-                                    .font(.subheadline)
-                                
-                                if isEditingTags {
-                                    Button(action: { removeTag(tag) }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.red)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.1))
-                            .foregroundColor(.blue)
-                            .cornerRadius(16)
+                            TagChipView(
+                                tag: tag,
+                                isSelected: selectedTag == tag,
+                                isEditing: isEditingTags,
+                                onSelect: { selectedTag = (selectedTag == tag) ? nil : tag },
+                                onRemove: { removeTag(tag) }
+                            )
                         }
                         
                         if isEditingTags {
@@ -166,6 +157,15 @@ struct ClipboardDetailView: View {
                     Label("Delete", systemImage: "trash")
                 }
             }
+        }
+        .focusable()
+        .onKeyPress(.escape) {
+            if let tag = selectedTag {
+                removeTag(tag)
+                selectedTag = nil
+                return .handled
+            }
+            return .ignored
         }
     }
     
@@ -253,5 +253,40 @@ struct AsyncImageLoader: View {
                 self.isLoading = false
             }
         }
+    }
+}
+
+// MARK: - Tag Chip View
+/// Reusable tag chip with selection and delete support
+struct TagChipView: View {
+    let tag: String
+    let isSelected: Bool
+    let isEditing: Bool
+    let onSelect: () -> Void
+    let onRemove: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(tag)
+                .font(.subheadline)
+            
+            if isEditing {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isSelected ? Color.blue.opacity(0.3) : Color.blue.opacity(0.1))
+        .foregroundColor(.blue)
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+        )
+        .onTapGesture(perform: onSelect)
     }
 }
