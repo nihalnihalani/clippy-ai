@@ -30,10 +30,8 @@ struct ClippyApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(container)
+                .preferredColorScheme(.light)
                 .onAppear {
-                    // We need to inject the modelContext once the container and context are ready
-                    // However, we can't easily access modelContext here outside of a View context usually.
-                    // But sharedModelContainer.mainContext is available!
                     container.inject(modelContext: sharedModelContainer.mainContext)
                 }
         }
