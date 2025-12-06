@@ -12,7 +12,7 @@ struct ClipboardDetailView: View {
     
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 20) {
                 // Header / Title
                 VStack(alignment: .leading, spacing: 8) {
                     Text(item.title ?? item.content)
@@ -43,24 +43,24 @@ struct ClipboardDetailView: View {
                     
                     if item.contentType == "image", let imagePath = item.imagePath {
                         AsyncImageLoader(imagePath: imagePath)
-                            .cornerRadius(8)
+                            .cornerRadius(12)
                             .frame(maxHeight: 500)
-                            .shadow(radius: 2)
+                            .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
                         
                         // Show description below image
                         Text(item.content)
                             .font(.body)
-                            .padding()
+                            .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.gray.opacity(0.05))
+                            .background(.regularMaterial)
                             .cornerRadius(12)
                             .textSelection(.enabled)
                     } else {
                         Text(item.content)
-                            .font(.body)
-                            .padding()
+                            .font(.system(.body, design: .monospaced))
+                            .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.gray.opacity(0.05))
+                            .background(.regularMaterial)
                             .cornerRadius(12)
                             .textSelection(.enabled)
                     }
@@ -134,8 +134,9 @@ struct ClipboardDetailView: View {
                 
                 Spacer()
             }
-            .padding(24)
+            .padding(20)
         }
+        .background(.ultraThinMaterial)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
@@ -266,27 +267,37 @@ struct TagChipView: View {
     let onRemove: () -> Void
     
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
+            Image(systemName: "tag.fill")
+                .font(.system(size: 10))
+                .foregroundColor(isSelected ? .white : .blue.opacity(0.8))
+            
             Text(tag)
-                .font(.subheadline)
+                .font(.system(.caption, weight: .medium))
             
             if isEditing {
                 Button(action: onRemove) {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.red)
+                        .font(.system(size: 14))
+                        .foregroundColor(.red.opacity(0.8))
+                        .symbolEffect(.pulse, options: .repeating, isActive: isEditing)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(isSelected ? Color.blue.opacity(0.3) : Color.blue.opacity(0.1))
-        .foregroundColor(.blue)
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color.blue : Color.blue.opacity(0.12))
         )
+        .foregroundColor(isSelected ? .white : .blue)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(isSelected ? Color.blue : Color.clear, lineWidth: 1.5)
+        )
+        .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 }

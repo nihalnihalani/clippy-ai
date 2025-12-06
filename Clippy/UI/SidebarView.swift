@@ -196,14 +196,17 @@ struct KeyboardShortcutHint: View {
     let description: String
     
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Text(keys)
-                .font(.system(.caption, design: .monospaced))
-                .fontWeight(.semibold)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(Color.secondary.opacity(0.2))
-                .cornerRadius(4)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5)
+                )
             
             Text(description)
                 .font(.caption)
