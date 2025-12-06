@@ -504,29 +504,30 @@ Result: Your text replaced with answer automatically!
 ```
 Clippy/
 ├── App/                    # Entry point
-│   ├── ClippyApp.swift
-│   └── AppDependencyContainer.swift
-├── Core/                   # Models & protocols
+│   └── ClippyApp.swift
+├── Services/               # All business logic (15 files)
+│   ├── AppDependencyContainer.swift
 │   ├── Models.swift
-│   ├── AIServiceProtocol.swift
-│   └── ClipboardRepository.swift
-├── Services/               # All business logic (flat)
-│   ├── ClipboardMonitor.swift
+│   ├── ClipboardMonitor.swift  # + ClipboardService
+│   ├── ClipboardRepository.swift
 │   ├── ContextEngine.swift
 │   ├── GeminiService.swift
-│   ├── LocalAIService.swift
+│   ├── LocalAIService.swift    # Native MLXLLM
+│   ├── ElevenLabsService.swift # + AudioRecorder
 │   ├── HotkeyManager.swift
 │   ├── TextCaptureService.swift
 │   └── VisionScreenParser.swift
-├── UI/                     # Views (flat)
+├── UI/                     # All views (5 files)
 │   ├── ContentView.swift
 │   ├── ClipboardListView.swift
-│   ├── ClipboardDetailView.swift
+│   ├── ClipboardDetailView.swift  # + FlowLayout
+│   ├── ClippyWindowController.swift # + ClippyGifPlayer
 │   └── SidebarView.swift
-├── ViewModels/             # MVVM
-│   └── SessionViewModel.swift
 └── Resources/              # GIF animations
 ```
+
+**8 directories, 28 files, ~5,100 lines**
+
 
 ---
 
