@@ -4,7 +4,7 @@ import SwiftData
 struct ClipboardListView: View {
     @Binding var selectedItems: Set<PersistentIdentifier>
     var category: NavigationCategory?
-    var searchText: String
+    @Binding var searchText: String
     
     @EnvironmentObject var container: AppDependencyContainer
     @Environment(\.modelContext) private var modelContext
@@ -16,70 +16,18 @@ struct ClipboardListView: View {
     @State private var lastClickedItemId: PersistentIdentifier? // For shift-click range selection
     
     var body: some View {
-        List(selection: $selectedItems) {
-            if searchText.isEmpty {
-                // Normal List View
-                ForEach(filteredItems) { item in
-                    ClipboardItemRow(item: item, isSelected: selectedItems.contains(item.persistentModelID))
-                        .tag(item)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .contextMenu {
-                            Button {
-                                copyToClipboard(item)
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                            }
-                            
-                            Divider()
-                            
-                            Button {
-                                performTransform(item, instruction: "Fix grammar and spelling.")
-                            } label: {
-                                Label("Fix Grammar", systemImage: "text.badge.checkmark")
-                            }
-                            
-                            Button {
-                                performTransform(item, instruction: "Summarize this text in one sentence.")
-                            } label: {
-                                Label("Summarize", systemImage: "text.quote")
-                            }
-                            
-                            Button {
-                                performTransform(item, instruction: "Convert this to valid JSON.")
-                            } label: {
-                                Label("To JSON", systemImage: "curlybraces")
-                            }
-                            
-                            Divider()
-                            
-                            Button(role: .destructive) {
-                                deleteItem(item)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                }
-            } else {
-                // Search Results View
-                if isSearching {
-                    HStack {
-                        Spacer()
-                        ProgressView("Searching...")
-                            .scaleEffect(0.8)
-                        Spacer()
-                    }
-                    .listRowSeparator(.hidden)
-                } else if searchResults.isEmpty {
-                    ContentUnavailableView.search(text: searchText)
-                } else {
-
-                    ForEach(searchResults) { item in
+        VStack(spacing: 0) {
+            // "World Class" Glass Search Bar
+            // Search bar moved to toolbar
+            
+            List(selection: $selectedItems) {
+                if searchText.isEmpty {
+                    // Normal List View
+                    ForEach(filteredItems) { item in
                         ClipboardItemRow(item: item, isSelected: selectedItems.contains(item.persistentModelID))
                             .tag(item)
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
-                            .tag(item)
                             .contextMenu {
                                 Button {
                                     copyToClipboard(item)
@@ -116,12 +64,84 @@ struct ClipboardListView: View {
                                 }
                             }
                     }
+                } else {
+                    // Search Results View
+                    if isSearching {
+                        HStack {
+                            Spacer()
+                            ProgressView("Searching...")
+                                .scaleEffect(0.8)
+                            Spacer()
+                        }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    } else if searchResults.isEmpty {
+                        ContentUnavailableView.search(text: searchText)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(searchResults) { item in
+                            ClipboardItemRow(item: item, isSelected: selectedItems.contains(item.persistentModelID))
+                                .tag(item)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .contextMenu {
+                                    Button {
+                                        copyToClipboard(item)
+                                    } label: {
+                                        Label("Copy", systemImage: "doc.on.doc")
+                                    }
+                                    
+                                    Divider()
+                                    
+                                    Button {
+                                        performTransform(item, instruction: "Fix grammar and spelling.")
+                                    } label: {
+                                        Label("Fix Grammar", systemImage: "text.badge.checkmark")
+                                    }
+                                    
+                                    Button {
+                                        performTransform(item, instruction: "Summarize this text in one sentence.")
+                                    } label: {
+                                        Label("Summarize", systemImage: "text.quote")
+                                    }
+                                    
+                                    Button {
+                                        performTransform(item, instruction: "Convert this to valid JSON.")
+                                    } label: {
+                                        Label("To JSON", systemImage: "curlybraces")
+                                    }
+                                    
+                                    Divider()
+                                    
+                                    Button(role: .destructive) {
+                                        deleteItem(item)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                        }
+                    }
                 }
             }
+            .listStyle(.plain)
+            .navigationTitle(category?.rawValue ?? "Clipboard")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    GlassSearchBar(searchText: $searchText)
+                        .frame(width: 250) // Slightly smaller for right alignment
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+            .onKeyPress(.escape) {
+                if !selectedItems.isEmpty {
+                    selectedItems.removeAll()
+                    return .handled
+                }
+                return .ignored
+            }
         }
-        .scrollContentBackground(.hidden)
-        .background(Color.clear)
-        .listStyle(.plain)
         .navigationTitle(category?.rawValue ?? "Clipboard")
         .onChange(of: searchText) { _, newValue in
             // Cancel previous task
@@ -153,7 +173,6 @@ struct ClipboardListView: View {
                     if Task.isCancelled { return }
                     
                     // Efficiently find items in current loaded list
-                    // Note: For very large datasets, we might need a direct fetch by ID
                     let foundItems = allItems.filter { ids.contains($0.vectorId ?? UUID()) }
                     
                     // Sort by the order returned from search (relevance)
@@ -164,20 +183,6 @@ struct ClipboardListView: View {
                     self.isSearching = false
                 }
             }
-        }
-        .focusable()
-        .onKeyPress(.escape) {
-            if !selectedItems.isEmpty {
-                // Delete all selected items
-                for itemId in selectedItems {
-                    if let item = allItems.first(where: { $0.id == itemId }) {
-                        deleteItem(item)
-                    }
-                }
-                selectedItems.removeAll()
-                return .handled
-            }
-            return .ignored
         }
     }
     
@@ -224,6 +229,7 @@ struct ClipboardItemRow: View {
     let item: Item
     let isSelected: Bool
     @State private var actions: [ClipboardAction] = []
+    @State private var isHovering = false
     
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -263,17 +269,21 @@ struct ClipboardItemRow: View {
                     HStack(spacing: 4) {
                         ForEach(item.tags.prefix(2), id: \.self) { tag in
                             Text(tag)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
                                 .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Material.ultraThin)
+                                .padding(.vertical, 4)
+                                .background(Color.white.opacity(0.15))
                                 .clipShape(Capsule())
+                                .overlay(
+                                    Capsule()
+                                        .stroke(.white.opacity(0.2), lineWidth: 0.5)
+                                )
                         }
                         if item.tags.count > 2 {
                             Text("+\(item.tags.count - 2)")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary.opacity(0.6))
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white.opacity(0.7))
                         }
                     }
                     .padding(.top, 2)
@@ -290,14 +300,10 @@ struct ClipboardItemRow: View {
                     .padding(4)
             }
         }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
-        )
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .modifier(ClipboardItemRowStyle(isSelected: isSelected, isHovering: isHovering))
+        .onHover { hover in
+            isHovering = hover
+        }
         .onAppear {
             if actions.isEmpty && item.contentType == "text" {
                 DispatchQueue.global(qos: .background).async {
@@ -320,7 +326,7 @@ struct ClipboardItemRow: View {
         switch item.contentType {
         case "image": return .blue
         case "code": return .purple
-        default: return .orange
+        default: return .blue
         }
     }
     
@@ -331,7 +337,7 @@ struct ClipboardItemRow: View {
         case "code":
             return LinearGradient(colors: [.purple, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
         default:
-            return LinearGradient(colors: [.orange, .yellow], startPoint: .topLeading, endPoint: .bottomTrailing)
+            return LinearGradient(colors: [.blue, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
     
@@ -339,6 +345,60 @@ struct ClipboardItemRow: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+struct GlassSearchBar: View {
+    @Binding var searchText: String
+    
+    var body: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+            
+            TextField("Ask your clipboard...", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+            
+            if !searchText.isEmpty {
+                Button(action: { searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.05))
+        .background(.thickMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.white.opacity(0.3), lineWidth: 1)
+        )
+        // .padding(16) removed for toolbar usage
+    }
+}
+
+// MARK: - Row Style Modifier
+struct ClipboardItemRowStyle: ViewModifier {
+    let isSelected: Bool
+    let isHovering: Bool
+    
+    func body(content: Content) -> some View {
+        content
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(isSelected ? AnyShapeStyle(Color.accentColor.opacity(0.1)) : AnyShapeStyle(isHovering ? .regularMaterial : .thinMaterial))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.white.opacity(isSelected ? 0.5 : 0.1), lineWidth: 1)
+            )
+            // .scaleEffect removed per user request
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovering)
+            .shadow(color: Color.black.opacity(isHovering ? 0.1 : 0.05), radius: isHovering ? 8 : 2, x: 0, y: isHovering ? 4 : 1)
     }
 }
 

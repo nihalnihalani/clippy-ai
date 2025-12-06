@@ -37,7 +37,10 @@ struct SidebarView: View {
                     }
                 }
             }
+            .padding(.top, 44) // Clear traffic lights
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
             
             // Bottom Panel
             VStack(spacing: 12) {
@@ -82,7 +85,23 @@ struct SidebarView: View {
                 Divider()
                     .opacity(0.5)
                 
-                // Actions
+                // Shortcuts Row (Left Aligned)
+                HStack {
+                    DisclosureGroup("Shortcuts", isExpanded: $showShortcuts) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            KeyboardShortcutHint(keys: "⌥X", description: "Ask")
+                            KeyboardShortcutHint(keys: "⌥V", description: "OCR")
+                            KeyboardShortcutHint(keys: "⌥␣", description: "Voice")
+                        }
+                        .padding(.top, 4)
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    
+                    Spacer()
+                }
+                
+                // Actions Row (Buttons)
                 HStack(spacing: 8) {
                     Button(action: reindexSearch) {
                         Image(systemName: "arrow.clockwise")
@@ -100,23 +119,14 @@ struct SidebarView: View {
                     .help("Clear History")
                     
                     Spacer()
-                    
-                    // Shortcuts disclosure
-                    DisclosureGroup("", isExpanded: $showShortcuts) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            KeyboardShortcutHint(keys: "⌥X", description: "Ask")
-                            KeyboardShortcutHint(keys: "⌥V", description: "OCR")
-                            KeyboardShortcutHint(keys: "⌥␣", description: "Voice")
-                        }
-                        .padding(.top, 4)
-                    }
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
                 }
             }
             .padding(16)
             .background(.regularMaterial)
         }
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
+        .ignoresSafeArea(edges: .top)
         .confirmationDialog(
             "Clear All Clipboard History?",
             isPresented: $showClearConfirmation,

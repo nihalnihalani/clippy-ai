@@ -12,6 +12,21 @@ struct ClipboardDetailView: View {
     
     var body: some View {
         ZStack {
+            // 1. Ambient Background Glow
+            GeometryReader { proxy in
+                Circle()
+                    .fill(Color.accentColor.opacity(0.15))
+                    .frame(width: 400, height: 400)
+                    .blur(radius: 100)
+                    .offset(x: -100, y: -100) // Top left glow
+                
+                Circle()
+                    .fill(Color.blue.opacity(0.1))
+                    .frame(width: 300, height: 300)
+                    .blur(radius: 80)
+                    .offset(x: proxy.size.width - 100, y: proxy.size.height - 100) // Bottom right glow
+            }
+            
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     // Header
@@ -64,12 +79,16 @@ struct ClipboardDetailView: View {
                             FlowLayout(spacing: 8) {
                                 ForEach(item.tags, id: \.self) { tag in
                                     Text(tag)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.white)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 4)
-                                        .background(.ultraThinMaterial)
+                                        .background(Color.white.opacity(0.15))
                                         .clipShape(Capsule())
+                                        .overlay(
+                                            Capsule()
+                                                .stroke(.white.opacity(0.2), lineWidth: 0.5)
+                                        )
                                 }
                             }
                             .padding(.horizontal, 20)

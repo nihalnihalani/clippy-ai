@@ -63,9 +63,8 @@ struct ContentView: View {
             ClipboardListView(
                 selectedItems: $selectedItems,
                 category: selectedCategory ?? .allItems,
-                searchText: searchText
+                searchText: $searchText
             )
-            .searchable(text: $searchText, placement: .sidebar)
         } detail: {
             // Show first selected item in detail view
             if let firstSelectedId = selectedItems.first,

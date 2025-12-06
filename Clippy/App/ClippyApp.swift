@@ -30,6 +30,8 @@ struct ClippyApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(container)
+                .fontDesign(.rounded)
+                .preferredColorScheme(.dark)
                 .onAppear {
                     container.inject(modelContext: sharedModelContainer.mainContext)
                 }
