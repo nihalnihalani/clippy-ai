@@ -38,7 +38,7 @@ struct ContentView: View {
     
     // Navigation State
     @State private var selectedCategory: NavigationCategory? = .allItems
-    @State private var selectedItem: Item?
+    @State private var selectedItems: Set<PersistentIdentifier> = []
     @State private var searchText: String = ""
     @State private var showSettings: Bool = false
     @State private var selectedAIService: AIServiceType = .local // Default to Local
@@ -61,13 +61,15 @@ struct ContentView: View {
             )
         } content: {
             ClipboardListView(
-                selectedItem: $selectedItem,
+                selectedItems: $selectedItems,
                 category: selectedCategory ?? .allItems,
                 searchText: searchText
             )
             .searchable(text: $searchText, placement: .sidebar)
         } detail: {
-            if let item = selectedItem {
+            // Show first selected item in detail view
+            if let firstSelectedId = selectedItems.first,
+               let item = allItems.first(where: { $0.id == firstSelectedId }) {
                 ClipboardDetailView(item: item)
             } else {
                 VStack(spacing: 16) {

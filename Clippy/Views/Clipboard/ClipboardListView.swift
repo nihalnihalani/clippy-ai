@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct ClipboardListView: View {
-    @Binding var selectedItem: Item?
+    @Binding var selectedItems: Set<PersistentIdentifier>
     var category: NavigationCategory?
     var searchText: String
     
@@ -13,9 +13,10 @@ struct ClipboardListView: View {
     @State private var searchResults: [Item] = []
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>?
+    @State private var lastClickedItemId: PersistentIdentifier? // For shift-click range selection
     
     var body: some View {
-        List(selection: $selectedItem) {
+        List(selection: $selectedItems) {
             if searchText.isEmpty {
                 // Normal List View
                 ForEach(filteredItems) { item in
@@ -159,9 +160,14 @@ struct ClipboardListView: View {
         }
         .focusable()
         .onKeyPress(.escape) {
-            if let item = selectedItem {
-                deleteItem(item)
-                selectedItem = nil
+            if !selectedItems.isEmpty {
+                // Delete all selected items
+                for itemId in selectedItems {
+                    if let item = allItems.first(where: { $0.id == itemId }) {
+                        deleteItem(item)
+                    }
+                }
+                selectedItems.removeAll()
                 return .handled
             }
             return .ignored
