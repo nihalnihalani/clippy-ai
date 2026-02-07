@@ -61,7 +61,7 @@ class ClippyMascotState: ObservableObject {
     @Published var isVisible: Bool {
         didSet { UserDefaults.standard.set(isVisible, forKey: "MascotVisible") }
     }
-    @Published var corner: MascotCorner = .bottomRight {
+    @Published var corner: MascotCorner = .topRight {
         didSet { UserDefaults.standard.set(corner.rawValue, forKey: "MascotCorner") }
     }
 

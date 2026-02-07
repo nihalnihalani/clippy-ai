@@ -29,14 +29,14 @@ struct ClippyMascotView: View {
             .gesture(dragGesture)
             .onTapGesture(count: 2) {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
-                    mascotState.corner = .bottomRight
+                    mascotState.corner = .topRight
                 }
             }
             .contextMenu {
                 Button("Hide Mascot") { mascotState.toggleVisibility() }
                 Button("Reset Position") {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
-                        mascotState.corner = .bottomRight
+                        mascotState.corner = .topRight
                     }
                 }
                 Divider()
@@ -44,7 +44,7 @@ struct ClippyMascotView: View {
                     Button("Top Left") { mascotState.corner = .topLeft }
                     Button("Top Right") { mascotState.corner = .topRight }
                     Button("Bottom Left") { mascotState.corner = .bottomLeft }
-                    Button("Bottom Right") { mascotState.corner = .bottomRight }
+                    Button("Bottom Right") { mascotState.corner = .topRight }
                 }
             }
             .accessibilityLabel("Clippy mascot")
