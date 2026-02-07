@@ -94,7 +94,7 @@ struct SidebarView: View {
                     }
                 }
             }
-            .padding(.top, 12) // Compact top
+            .padding(.top, 44) // Clear traffic light buttons
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .background(Color.clear)
@@ -135,6 +135,16 @@ struct SidebarView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+
+                Divider()
+
+                // Shortcuts
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    shortcutBadge("magnifyingglass", label: "Search", shortcut: "\u{2318}\u{21E7}V")
+                    shortcutBadge("brain", label: "Ask", shortcut: "\u{2318}\u{21E7}A")
+                    shortcutBadge("eye", label: "OCR", shortcut: "\u{2318}\u{21E7}O")
+                    shortcutBadge("mic", label: "Voice", shortcut: "\u{2318}\u{21E7}D")
+                }
             }
             .padding(16)
             .background(.regularMaterial)
@@ -156,15 +166,32 @@ struct SidebarView: View {
     }
 
     private var topApps: [String] {
-        let today = Calendar.current.startOfDay(for: Date())
-        let todayItems = allItemsForCounts.filter { $0.timestamp >= today }
+        let sevenDaysAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let recentItems = allItemsForCounts.filter { $0.timestamp >= sevenDaysAgo }
         var appCounts: [String: Int] = [:]
-        for item in todayItems {
+        for item in recentItems {
             if let app = item.appName, !app.isEmpty, app != "Unknown" {
                 appCounts[app, default: 0] += 1
             }
         }
         return appCounts.sorted { $0.value > $1.value }.prefix(3).map { $0.key }
+    }
+
+    private func shortcutBadge(_ icon: String, label: String, shortcut: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+            Spacer()
+            Text(shortcut)
+                .font(.system(size: 8, weight: .medium, design: .rounded))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
     }
 
     static func isCodeContent(_ item: Item) -> Bool {

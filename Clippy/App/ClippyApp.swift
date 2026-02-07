@@ -87,7 +87,7 @@ struct ClippyApp: App {
                     Text("An external app wants to copy text to your clipboard:\n\"\(String((urlCopyText ?? "").prefix(100)))\"")
                 }
         }
-        .defaultSize(width: 960, height: 640)
+        .defaultSize(width: 660, height: 490)
         .modelContainer(sharedModelContainer)
 
         MenuBarExtra("Clippy", systemImage: "paperclip") {

@@ -37,6 +37,7 @@ struct ContentView: View {
     @Query(sort: \Item.timestamp, order: .reverse) private var allItems: [Item]
 
     var body: some View {
+        ZStack {
         NavigationSplitView {
             SidebarView(
                 selection: $selectedCategory,
@@ -78,6 +79,13 @@ struct ContentView: View {
                 }
                 .padding(32)
             }
+        }
+            // Mascot overlay — always visible in chosen corner
+            ClippyMascotView(mascotState: container.mascotState)
+                .allowsHitTesting(true)
+        } // end ZStack
+        .onChange(of: showSettings) { _, isOpen in
+            if isOpen { container.mascotState.onSettingsOpened() }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(
@@ -166,10 +174,12 @@ struct ContentView: View {
 
     private func handleSearchOverlayTrigger() {
         Logger.ui.info("Search overlay hotkey triggered (Cmd+Shift+V)")
+        let wasVisible = container.searchOverlayController.isVisible
         container.searchOverlayController.toggle(
             modelContainer: modelContext.container,
             container: container
         )
+        container.mascotState.onSearchOverlay(opened: !wasVisible)
     }
     
     // MARK: - Input Mode Management
@@ -206,6 +216,7 @@ struct ContentView: View {
         activeInputMode = .visionCapture
 
         clippyController.setState(.thinking, message: "Capturing screen... 📸")
+        container.mascotState.onVisionCapture()
 
         Task {
             let result = await visionParser.parseCurrentScreen()
@@ -372,6 +383,7 @@ struct ContentView: View {
             // Check if there was an error
             if let errorMessage = errorMessage {
                 self.clippyController.setState(.error, message: "❌ \(errorMessage)")
+                self.container.mascotState.onAIError()
                 // Auto-hide after showing error
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     self.clippyController.hide()
@@ -498,6 +510,7 @@ struct ContentView: View {
             isRecordingVoice = true
             _ = audioRecorder.startRecording()
             clippyController.setState(.idle, message: "Listening... 🎙️")
+            container.mascotState.onVoiceRecording(active: true)
         }
     }
     

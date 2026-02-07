@@ -14,6 +14,9 @@ class AppDependencyContainer: ObservableObject {
     let clippyController: ClippyWindowController
     let searchOverlayController: SearchOverlayController
 
+    // Mascot
+    let mascotState: ClippyMascotState
+
     // AI Services
     let localAIService: LocalAIService
     let geminiService: GeminiService
@@ -56,6 +59,7 @@ class AppDependencyContainer: ObservableObject {
         self.contextEngine = ContextEngine()
         self.visionParser = VisionScreenParser()
         self.hotkeyManager = HotkeyManager()
+        self.mascotState = ClippyMascotState()
         self.clippyController = ClippyWindowController()
         self.searchOverlayController = SearchOverlayController()
         self.audioRecorder = AudioRecorder()
@@ -122,6 +126,9 @@ class AppDependencyContainer: ObservableObject {
             )
         }
         
+        // Wire mascot state to observe clipboard + AI events
+        mascotState.wire(clipboardMonitor: clipboardMonitor, queryOrchestrator: queryOrchestrator)
+
         // Inject dependencies into TextCaptureService
         textCaptureService.setDependencies(
             clippyController: clippyController,
