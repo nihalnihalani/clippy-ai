@@ -5,10 +5,12 @@ struct ClipboardDetailView: View {
     @Bindable var item: Item
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var container: AppDependencyContainer
-    
+
     // UI State
     @State private var showCopiedFeedback: Bool = false
     @State private var isHoveringBar: Bool = false
+    @State private var transformResult: String?
+    @State private var showTransformCopied: Bool = false
     
     var body: some View {
         ZStack {
@@ -76,7 +78,7 @@ struct ClipboardDetailView: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(.secondary.opacity(0.8))
                                 .tracking(1)
-                            
+
                             FlowLayout(spacing: 8) {
                                 ForEach(item.tags, id: \.self) { tag in
                                     Text(tag)
@@ -91,8 +93,84 @@ struct ClipboardDetailView: View {
                         }
                         .padding(.top, 32)
                         .padding(.horizontal, 32)
-                        .padding(.bottom, 100) // Clearance for floating bar
                     }
+
+                    // Transforms Section
+                    if item.contentType != "image" {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("TRANSFORMS")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.secondary.opacity(0.8))
+                                .tracking(1)
+
+                            ForEach(TransformCategory.allCases, id: \.rawValue) { category in
+                                let categoryTransforms = TransformRegistry.shared.transforms(for: category)
+                                if !categoryTransforms.isEmpty {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(category.rawValue)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundColor(.secondary)
+
+                                        FlowLayout(spacing: 6) {
+                                            ForEach(categoryTransforms) { transform in
+                                                Button {
+                                                    transformResult = transform.transform(item.content)
+                                                } label: {
+                                                    Label(transform.name, systemImage: transform.icon)
+                                                        .font(.system(size: 11, weight: .medium))
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 5)
+                                                        .background(Color.primary.opacity(0.05))
+                                                        .foregroundColor(.primary.opacity(0.7))
+                                                        .clipShape(Capsule())
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Transform Result
+                            if let result = transformResult {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("Result")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        Button {
+                                            NSPasteboard.general.clearContents()
+                                            NSPasteboard.general.setString(result, forType: .string)
+                                            showTransformCopied = true
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                                showTransformCopied = false
+                                            }
+                                        } label: {
+                                            Label(showTransformCopied ? "Copied" : "Copy", systemImage: showTransformCopied ? "checkmark" : "doc.on.doc")
+                                                .font(.system(size: 11, weight: .medium))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundColor(showTransformCopied ? .green : .secondary)
+                                    }
+
+                                    Text(result)
+                                        .font(.system(size: 13, weight: .regular, design: .monospaced))
+                                        .lineSpacing(4)
+                                        .foregroundColor(.primary.opacity(0.85))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(12)
+                                        .background(Color.primary.opacity(0.03))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
+                        .padding(.top, 32)
+                        .padding(.horizontal, 32)
+                    }
+
+                    Spacer().frame(height: 100) // Clearance for floating bar
                 }
             }
             
@@ -108,9 +186,10 @@ struct ClipboardDetailView: View {
                             color: item.isFavorite ? .red : .primary,
                             action: { withAnimation(.snappy) { item.isFavorite.toggle() } }
                         )
-                        
+                        .accessibilityLabel(item.isFavorite ? "Remove from favorites" : "Add to favorites")
+
                         Divider().frame(height: 16).padding(.horizontal, 8)
-                        
+
                         // Copy
                         ActionButton(
                             icon: showCopiedFeedback ? "checkmark" : "doc.on.doc",
@@ -118,9 +197,10 @@ struct ClipboardDetailView: View {
                             action: copyContentWithFeedback
                         )
                         .id("copy_btn")
-                        
+                        .accessibilityLabel(showCopiedFeedback ? "Copied" : "Copy to clipboard")
+
                         Divider().frame(height: 16).padding(.horizontal, 8)
-                        
+
                         // Delete
                         ActionButton(
                             icon: "trash",
@@ -128,6 +208,7 @@ struct ClipboardDetailView: View {
                             hoverColor: .red,
                             action: deleteItem
                         )
+                        .accessibilityLabel("Delete item")
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)

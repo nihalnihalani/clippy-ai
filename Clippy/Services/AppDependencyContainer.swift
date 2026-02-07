@@ -12,23 +12,31 @@ class AppDependencyContainer: ObservableObject {
     let hotkeyManager: HotkeyManager
     let textCaptureService: TextCaptureService
     let clippyController: ClippyWindowController
-    
+    let searchOverlayController: SearchOverlayController
+
     // AI Services
     let localAIService: LocalAIService
     let geminiService: GeminiService
     let audioRecorder: AudioRecorder
     let queryOrchestrator: QueryOrchestrator
-    
+
+    // Multi-provider AI
+    let claudeProvider: ClaudeProvider
+    let openAIProvider: OpenAIProvider
+    let ollamaProvider: OllamaProvider
+    let aiRegistry: AIProviderRegistry
+    let aiRouter: AIRouter
+
     /// Currently selected AI service (persisted in UserDefaults)
     @Published var selectedAIServiceType: AIServiceType {
         didSet {
             UserDefaults.standard.set(selectedAIServiceType.rawValue, forKey: "SelectedAIService")
         }
     }
-    
+
     // Data Layer
     var repository: ClipboardRepository?
-    
+
     init() {
         Logger.services.info("Initializing services...")
 
@@ -46,19 +54,50 @@ class AppDependencyContainer: ObservableObject {
         self.visionParser = VisionScreenParser()
         self.hotkeyManager = HotkeyManager()
         self.clippyController = ClippyWindowController()
+        self.searchOverlayController = SearchOverlayController()
         self.audioRecorder = AudioRecorder()
         self.localAIService = LocalAIService()
         self.geminiService = GeminiService(apiKey: KeychainHelper.load(key: "Gemini_API_Key") ?? "")
         self.textCaptureService = TextCaptureService()
 
-        // 2. Initialize Dependent Services
+        // 2. Multi-provider AI setup
+        self.claudeProvider = ClaudeProvider()
+        self.openAIProvider = OpenAIProvider()
+        self.ollamaProvider = OllamaProvider()
+
+        let registry = AIProviderRegistry()
+        self.aiRegistry = registry
+
+        // Determine preferred provider from persisted selection
+        let preferredId: String
+        switch selectedAIServiceType {
+        case .claude: preferredId = "claude"
+        case .openai: preferredId = "openai"
+        case .ollama: preferredId = "ollama"
+        case .gemini: preferredId = "gemini"
+        case .local:  preferredId = "local"
+        }
+        self.aiRouter = AIRouter(registry: registry, preferredProviderId: preferredId)
+
+        // 3. Initialize Dependent Services
         self.clipboardMonitor = ClipboardMonitor()
         self.queryOrchestrator = QueryOrchestrator(
             vectorSearch: vectorSearch,
             geminiService: geminiService,
             localAIService: localAIService
         )
-        
+
+        // 4. Register all providers
+        registry.register(claudeProvider)
+        registry.register(openAIProvider)
+        registry.register(ollamaProvider)
+
+        // Wire AIRouter into QueryOrchestrator for new provider routing
+        queryOrchestrator.aiRouter = aiRouter
+
+        // Detect Ollama availability in background
+        Task { await ollamaProvider.detectAvailability() }
+
         Logger.services.info("Services initialized.")
     }
     

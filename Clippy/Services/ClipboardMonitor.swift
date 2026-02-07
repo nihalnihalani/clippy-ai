@@ -6,7 +6,7 @@ import os
 /// ClipboardMonitor: Thin orchestrator for clipboard events.
 /// Delegates context to ContextEngine, ingestion to Repository.
 @MainActor
-class ClipboardMonitor: ObservableObject {
+class ClipboardMonitor: ObservableObject, ClipboardMonitoring {
     @Published var clipboardContent: String = ""
     @Published var isMonitoring: Bool = false
 
@@ -19,6 +19,12 @@ class ClipboardMonitor: ObservableObject {
     private var contextEngine: ContextEngine?
     private var geminiService: GeminiService?
     private var localAIService: LocalAIService?
+
+    // Adaptive polling: fast after clipboard change, slow when idle
+    private var currentPollingInterval: TimeInterval = 0.3
+    private let minPollingInterval: TimeInterval = 0.3
+    private let maxPollingInterval: TimeInterval = 2.0
+    private let pollingBackoffMultiplier: Double = 1.2
     
     // MARK: - Computed Properties (delegated to ContextEngine)
     
@@ -55,20 +61,38 @@ class ClipboardMonitor: ObservableObject {
         }
         
         isMonitoring = true
-        
-        // Start monitoring timer
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.contextEngine?.updateContext()
-                self?.checkClipboard()
-            }
-        }
+
+        // Start monitoring with adaptive polling
+        scheduleNextPoll()
     }
-    
+
     func stopMonitoring() {
         timer?.invalidate()
         timer = nil
         isMonitoring = false
+    }
+
+    /// Schedule the next clipboard poll with adaptive interval.
+    /// After a change: resets to fast polling (0.3s).
+    /// While idle: gradually increases to slow polling (2.0s) to save CPU.
+    private func scheduleNextPoll() {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: currentPollingInterval, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, self.isMonitoring else { return }
+                self.contextEngine?.updateContext()
+                let changed = self.checkClipboardAndReportChange()
+                if changed {
+                    self.currentPollingInterval = self.minPollingInterval
+                } else {
+                    self.currentPollingInterval = min(
+                        self.currentPollingInterval * self.pollingBackoffMultiplier,
+                        self.maxPollingInterval
+                    )
+                }
+                self.scheduleNextPoll()
+            }
+        }
     }
     
     func requestAccessibilityPermission() {
@@ -84,33 +108,36 @@ class ClipboardMonitor: ObservableObject {
     }
     
     // MARK: - Clipboard Detection
-    
-    private func checkClipboard() {
+
+    /// Check clipboard and return whether a change was detected (for adaptive polling).
+    @discardableResult
+    private func checkClipboardAndReportChange() -> Bool {
         let pasteboard = NSPasteboard.general
         let currentChangeCount = pasteboard.changeCount
 
-        if currentChangeCount != lastChangeCount {
-            lastChangeCount = currentChangeCount
+        guard currentChangeCount != lastChangeCount else { return false }
+        lastChangeCount = currentChangeCount
 
-            // Skip this change if it was triggered by the app itself (e.g. status bar copy)
-            if skipNextClipboardChange {
-                skipNextClipboardChange = false
-                return
-            }
-
-            // Check for images first
-            if let imageData = pasteboard.data(forType: .tiff) ?? pasteboard.data(forType: .png) {
-                clipboardContent = "[Image]"
-                saveImageItem(imageData: imageData)
-            }
-            // Then check for text
-            else if let string = pasteboard.string(forType: .string) {
-                clipboardContent = string
-                saveClipboardItem(content: string)
-            } else {
-                clipboardContent = ""
-            }
+        // Skip this change if it was triggered by the app itself (e.g. status bar copy)
+        if skipNextClipboardChange {
+            skipNextClipboardChange = false
+            return true
         }
+
+        // Check for images first
+        if let imageData = pasteboard.data(forType: .tiff) ?? pasteboard.data(forType: .png) {
+            clipboardContent = "[Image]"
+            saveImageItem(imageData: imageData)
+        }
+        // Then check for text
+        else if let string = pasteboard.string(forType: .string) {
+            clipboardContent = string
+            saveClipboardItem(content: string)
+        } else {
+            clipboardContent = ""
+        }
+
+        return true
     }
     
     // MARK: - Image Handling
@@ -214,7 +241,8 @@ class ClipboardMonitor: ObservableObject {
         }
         
         Logger.clipboard.info("Saving new clipboard item")
-        
+
+        let isSensitive = SensitiveContentDetector.isSensitive(trimmedContent)
         let vectorId = UUID()
         Task {
             do {
@@ -228,9 +256,16 @@ class ClipboardMonitor: ObservableObject {
                     imagePath: nil,
                     title: nil
                 )
-                Logger.clipboard.info("Item saved")
+
+                // Persist sensitivity flag and set expiry for sensitive items
+                if isSensitive {
+                    newItem.isSensitiveFlag = true
+                    newItem.expiresAt = Date().addingTimeInterval(3600) // 1 hour
+                }
+
+                Logger.clipboard.info("Item saved (sensitive: \(isSensitive, privacy: .public))")
                 // Skip AI tag generation for sensitive content
-                if !newItem.isSensitive {
+                if !isSensitive {
                     enhanceItem(newItem)
                 }
             } catch {
@@ -240,16 +275,17 @@ class ClipboardMonitor: ObservableObject {
     }
     
     // MARK: - AI Enhancement
-    
+
     private func enhanceItem(_ item: Item) {
         let content = item.content
         let appName = item.appName
-        
+        let needsTitle = item.title == nil && content.count > 100
+
         Task.detached(priority: .utility) { [weak self] in
             guard let self = self else { return }
-            
+
             var tags: [String] = []
-            
+
             if let localService = await self.localAIService {
                 tags = await Task { @MainActor in
                     await localService.generateTags(content: content, appName: appName, context: nil)
@@ -259,13 +295,34 @@ class ClipboardMonitor: ObservableObject {
                     await gemini.generateTags(content: content, appName: appName, context: nil)
                 }.value
             }
-            
-            if !tags.isEmpty, let repo = await self.repository {
+
+            // Auto-generate a title for long items that don't have one
+            var generatedTitle: String?
+            if needsTitle {
+                // Use first non-empty line, truncated to 50 chars
+                let firstLine = content.split(separator: "\n", maxSplits: 1).first
+                    .map(String.init)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !firstLine.isEmpty {
+                    generatedTitle = String(firstLine.prefix(50))
+                    if firstLine.count > 50 {
+                        generatedTitle?.append("...")
+                    }
+                }
+            }
+
+            let shouldUpdate = !tags.isEmpty || generatedTitle != nil
+            if shouldUpdate, let repo = await self.repository {
                 await MainActor.run {
-                    item.tags = tags
+                    if !tags.isEmpty {
+                        item.tags = tags
+                    }
+                    if let title = generatedTitle, item.title == nil {
+                        item.title = title
+                    }
                     Task {
                         try? await repo.updateItem(item)
-                        Logger.clipboard.info("Tags updated: \(tags, privacy: .private)")
+                        Logger.clipboard.info("Enhanced item (tags: \(tags.count, privacy: .public), title: \(generatedTitle != nil, privacy: .public))")
                     }
                 }
             }

@@ -10,6 +10,7 @@ class QueryOrchestrator: ObservableObject {
     private let vectorSearch: VectorSearchService
     private let geminiService: GeminiService
     private let localAIService: LocalAIService
+    var aiRouter: AIRouter?
 
     @Published var isProcessing = false
 
@@ -116,13 +117,22 @@ class QueryOrchestrator: ObservableObject {
                 answer = nil
             }
             imageIndex = nil
+
+        case .claude, .openai, .ollama:
+            // Route through the AIRouter for new providers
+            answer = await aiRouter?.generateAnswer(
+                question: query,
+                clipboardContext: clipboardContext,
+                appName: appName
+            )
+            imageIndex = nil
         }
 
         let errorMessage: String?
         switch aiServiceType {
         case .gemini:
             errorMessage = geminiService.lastErrorMessage
-        case .local:
+        case .local, .claude, .openai, .ollama:
             errorMessage = nil
         }
         return QueryResult(

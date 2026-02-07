@@ -8,7 +8,14 @@ class TextCaptureService: ObservableObject {
     @Published var isCapturing = false
     @Published var capturedText = ""
     @Published var captureStartTime: Date?
-    
+    @Published var canUndo: Bool = false
+
+    // Undo state
+    private var lastCapturedText: String = ""
+    private var lastReplacementTime: Date?
+    private var lastReplacedAnswer: String = ""
+    private let undoWindowSeconds: TimeInterval = 30
+
     // Dependencies
     private var clippyController: ClippyWindowController?
     private var clipboardMonitor: ClipboardMonitor?
@@ -108,12 +115,15 @@ class TextCaptureService: ObservableObject {
         // Store the length BEFORE clearing capturedText
         capturedTextLength = capturedText.count
         Logger.services.info("Stored captured text length: \(capturedTextLength, privacy: .public) characters")
-        
+
+        // Store captured text for undo
+        lastCapturedText = capturedText
+
         // Call completion handler with captured text
         if !capturedText.isEmpty {
             onCaptureComplete?(capturedText)
         }
-        
+
         // Reset state (but keep sourceApp and capturedTextLength for replacement)
         capturedText = ""
         captureStartTime = nil
@@ -251,7 +261,17 @@ class TextCaptureService: ObservableObject {
         }
         
         Logger.services.info("Replacing captured text with answer")
-        
+
+        // Store undo state
+        lastReplacedAnswer = answer
+        lastReplacementTime = Date()
+        canUndo = true
+
+        // Schedule undo window expiry
+        DispatchQueue.main.asyncAfter(deadline: .now() + undoWindowSeconds) { [weak self] in
+            self?.expireUndoIfNeeded()
+        }
+
         // Use Fluid Dictation's approach for deletion
         let src = CGEventSource(stateID: .hidSystemState)
         
@@ -272,6 +292,48 @@ class TextCaptureService: ObservableObject {
         }
     }
     
+    /// Undo the last Option+X replacement (within 30-second window)
+    func undoLastReplacement() {
+        guard canUndo,
+              let replacementTime = lastReplacementTime,
+              Date().timeIntervalSince(replacementTime) <= undoWindowSeconds else {
+            Logger.services.warning("Undo not available or window expired")
+            clearUndoState()
+            return
+        }
+
+        Logger.services.info("Undoing last replacement (\(self.lastReplacedAnswer.count, privacy: .public) chars -> \(self.lastCapturedText.count, privacy: .public) chars)")
+
+        let src = CGEventSource(stateID: .hidSystemState)
+
+        // Step 1: Delete the answer text
+        deleteCharacters(count: lastReplacedAnswer.count, using: src)
+
+        // Step 2: Paste the original captured text
+        let originalText = lastCapturedText
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.pasteTextAtomic(originalText)
+            Logger.services.info("Undo complete")
+        }
+
+        clearUndoState()
+    }
+
+    private func clearUndoState() {
+        canUndo = false
+        lastCapturedText = ""
+        lastReplacedAnswer = ""
+        lastReplacementTime = nil
+    }
+
+    private func expireUndoIfNeeded() {
+        guard let replacementTime = lastReplacementTime else { return }
+        if Date().timeIntervalSince(replacementTime) >= undoWindowSeconds {
+            Logger.services.info("Undo window expired")
+            clearUndoState()
+        }
+    }
+
     /// Insert text into the current cursor position (for voice input or direct insertion)
     func insertTextAtCursor(_ answer: String) {
         Logger.services.info("Inserting text at cursor position atomic")

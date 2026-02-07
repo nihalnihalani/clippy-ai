@@ -14,6 +14,8 @@ struct ClipboardListView: View {
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>?
     @State private var lastClickedItemId: PersistentIdentifier? // For shift-click range selection
+    @State private var copiedItemId: PersistentIdentifier?
+    @State private var keyboardIndex: Int = 0
     
     var body: some View {
         VStack(spacing: 0) {
@@ -65,6 +67,43 @@ struct ClipboardListView: View {
                 }
                 return .ignored
             }
+            .onKeyPress(.upArrow) {
+                let items = currentItems
+                if keyboardIndex > 0 {
+                    keyboardIndex -= 1
+                    selectItemAtIndex(keyboardIndex, in: items)
+                }
+                return .handled
+            }
+            .onKeyPress(.downArrow) {
+                let items = currentItems
+                if keyboardIndex < items.count - 1 {
+                    keyboardIndex += 1
+                    selectItemAtIndex(keyboardIndex, in: items)
+                }
+                return .handled
+            }
+            .onKeyPress(.return) {
+                let items = currentItems
+                if keyboardIndex >= 0, keyboardIndex < items.count {
+                    copyToClipboard(items[keyboardIndex])
+                }
+                return .handled
+            }
+            .onKeyPress(.delete, modifiers: .command) {
+                let items = currentItems
+                if keyboardIndex >= 0, keyboardIndex < items.count {
+                    deleteItem(items[keyboardIndex])
+                }
+                return .handled
+            }
+            .onKeyPress("d", modifiers: .command) {
+                let items = currentItems
+                if keyboardIndex >= 0, keyboardIndex < items.count {
+                    items[keyboardIndex].isFavorite.toggle()
+                }
+                return .handled
+            }
         }
         .navigationTitle(category?.rawValue ?? "Clipboard")
         .onChange(of: searchText) { _, newValue in
@@ -112,17 +151,36 @@ struct ClipboardListView: View {
     
     // Filter items based on category (when not searching)
     private var filteredItems: [Item] {
-        if let category = category, category == .favorites {
-            return allItems.filter { $0.isFavorite }
+        guard let category = category else { return allItems }
+        switch category {
+        case .allItems: return allItems
+        case .favorites: return allItems.filter { $0.isFavorite }
+        case .code: return allItems.filter { SidebarView.isCodeContent($0) }
+        case .urls: return allItems.filter { SidebarView.isURLContent($0) }
+        case .images: return allItems.filter { $0.contentType == "image" }
+        case .sensitive: return allItems.filter { $0.isSensitive }
         }
-        return allItems
     }
-    
+
+    // Active items list (search results or filtered)
+    private var currentItems: [Item] {
+        searchText.isEmpty ? filteredItems : searchResults
+    }
+
+    private func selectItemAtIndex(_ index: Int, in items: [Item]) {
+        guard index >= 0, index < items.count else { return }
+        selectedItems = [items[index].persistentModelID]
+    }
+
     // MARK: - Shared Row Builder
 
     @ViewBuilder
     private func clipboardRow(for item: Item) -> some View {
-        ClipboardItemRow(item: item, isSelected: selectedItems.contains(item.persistentModelID))
+        ClipboardItemRow(
+            item: item,
+            isSelected: selectedItems.contains(item.persistentModelID),
+            isCopied: copiedItemId == item.persistentModelID
+        )
             .tag(item)
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
@@ -175,7 +233,24 @@ struct ClipboardListView: View {
     }
     
     private func copyToClipboard(_ item: Item) {
-        ClipboardService.shared.copyTextToClipboard(item.content)
+        container.clipboardMonitor.skipNextClipboardChange = true
+
+        if item.contentType == "image", let imagePath = item.imagePath {
+            ClipboardService.shared.copyImageToClipboard(imagePath: imagePath)
+        } else {
+            ClipboardService.shared.copyTextToClipboard(item.content)
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            copiedItemId = item.persistentModelID
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation {
+                if copiedItemId == item.persistentModelID {
+                    copiedItemId = nil
+                }
+            }
+        }
     }
     
     private func deleteItem(_ item: Item) {
@@ -197,42 +272,94 @@ struct ClipboardListView: View {
 struct ClipboardItemRow: View {
     let item: Item
     let isSelected: Bool
+    var isCopied: Bool = false
     @State private var actions: [ClipboardAction] = []
     @State private var isHovering = false
-    
+
+    private var isCode: Bool { SidebarView.isCodeContent(item) }
+    private var isURL: Bool { SidebarView.isURLContent(item) }
+
+    private var urlDomain: String? {
+        guard isURL else { return nil }
+        let trimmed = item.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return URL(string: trimmed.components(separatedBy: "\n").first ?? trimmed)?.host
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            // Gradient Icon
-            ZStack {
-                Circle()
-                    .fill(iconGradient)
-                    .frame(width: 38, height: 38)
-                    .shadow(color: iconColor.opacity(0.3), radius: 4, x: 0, y: 2)
-                
-                Image(systemName: iconName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+            // Icon or image thumbnail
+            if item.contentType == "image", let imagePath = item.imagePath {
+                let imageURL = ClipboardService.shared.getImagesDirectory().appendingPathComponent(imagePath)
+                AsyncImage(url: imageURL) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
+                        Circle().fill(iconGradient)
+                        Image(systemName: "photo")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .frame(width: 38, height: 38)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .shadow(color: Color.blue.opacity(0.2), radius: 4, x: 0, y: 2)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(isCopied ? LinearGradient(colors: [.green, .mint], startPoint: .topLeading, endPoint: .bottomTrailing) : richIconGradient)
+                        .frame(width: 38, height: 38)
+                        .shadow(color: (isCopied ? Color.green : richIconColor).opacity(0.3), radius: 4, x: 0, y: 2)
+
+                    Image(systemName: isCopied ? "checkmark" : richIconName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                // Title
-                Text(item.title ?? item.content)
-                    .font(.system(.body, design: .rounded).weight(.medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                
+                // Title with content-aware font
+                if item.isSensitive {
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.orange)
+                        Text("Sensitive content")
+                            .font(.system(.body, design: .rounded).weight(.medium))
+                            .foregroundColor(.orange)
+                    }
+                } else if isCopied {
+                    Text("Copied!")
+                        .font(.system(.body, design: .rounded).weight(.medium))
+                        .foregroundColor(.green)
+                } else if isCode {
+                    Text(item.title ?? String(item.content.prefix(80)).replacingOccurrences(of: "\n", with: " "))
+                        .font(.system(.body, design: .monospaced).weight(.medium))
+                        .foregroundColor(.purple)
+                        .lineLimit(1)
+                } else if isURL, let domain = urlDomain {
+                    Text(domain)
+                        .font(.system(.body, design: .rounded).weight(.medium))
+                        .foregroundColor(.teal)
+                        .lineLimit(1)
+                } else {
+                    Text(item.title ?? item.content)
+                        .font(.system(.body, design: .rounded).weight(.medium))
+                        .foregroundColor(.primary)
+                        .lineLimit(item.content.count < 100 ? 3 : 1)
+                }
+
                 // Metadata
                 HStack(spacing: 6) {
                     Text(timeAgo(from: item.timestamp))
-                    
+
                     if let appName = item.appName {
-                        Text("·")
+                        Text("\u{00B7}")
                         Text(appName)
                     }
                 }
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
-                
+
                 // Tags (minimal)
                 if !item.tags.isEmpty {
                     HStack(spacing: 4) {
@@ -257,10 +384,34 @@ struct ClipboardItemRow: View {
                     }
                     .padding(.top, 2)
                 }
+
+                // Detected Actions (shown on hover or selection)
+                if !actions.isEmpty && (isHovering || isSelected) {
+                    HStack(spacing: 6) {
+                        ForEach(actions) { action in
+                            Button(action: { action.perform() }) {
+                                HStack(spacing: 3) {
+                                    Image(systemName: action.iconName)
+                                        .font(.system(size: 9))
+                                    Text(action.label)
+                                        .font(.system(size: 9, weight: .medium))
+                                }
+                                .foregroundColor(.accentColor)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.accentColor.opacity(0.12))
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .padding(.top, 2)
+                }
             }
-            
+
             Spacer()
-            
+
             // Favorite indicator
             if item.isFavorite {
                 Image(systemName: "heart.fill")
@@ -270,8 +421,11 @@ struct ClipboardItemRow: View {
             }
         }
         .modifier(ClipboardItemRowStyle(isSelected: isSelected, isHovering: isHovering))
+        .draggable(item.content)
         .onHover { hover in
-            isHovering = hover
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovering = hover
+            }
         }
         .onAppear {
             if actions.isEmpty && item.contentType == "text" {
@@ -281,25 +435,51 @@ struct ClipboardItemRow: View {
                 }
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+        .accessibilityValue(item.isFavorite ? "Favorite" : "")
+        .accessibilityHint("Double click to copy. Use context menu for more actions.")
     }
-    
-    private var iconName: String {
+
+    private var accessibilityDescription: String {
+        let type = item.contentType == "image" ? "Image" : "Text"
+        let content = item.isSensitive ? "Sensitive content" : String((item.title ?? item.content).prefix(60))
+        let app = item.appName ?? "Unknown app"
+        return "\(type) from \(app): \(content)"
+    }
+
+    private var richIconName: String {
+        if item.isSensitive { return "lock.fill" }
+        if isCode { return "chevron.left.forwardslash.chevron.right" }
+        if isURL { return "link" }
         switch item.contentType {
         case "image": return "photo"
         case "code": return "chevron.left.forwardslash.chevron.right"
         default: return "doc.text"
         }
     }
-    
-    private var iconColor: Color {
+
+    private var richIconColor: Color {
+        if item.isSensitive { return .orange }
+        if isCode { return .purple }
+        if isURL { return .teal }
         switch item.contentType {
         case "image": return .blue
         case "code": return .purple
         default: return .blue
         }
     }
-    
-    private var iconGradient: LinearGradient {
+
+    private var richIconGradient: LinearGradient {
+        if item.isSensitive {
+            return LinearGradient(colors: [.orange, .red], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        if isCode {
+            return LinearGradient(colors: [.purple, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        if isURL {
+            return LinearGradient(colors: [.teal, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
         switch item.contentType {
         case "image":
             return LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -309,6 +489,11 @@ struct ClipboardItemRow: View {
             return LinearGradient(colors: [.blue, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
+
+    // Legacy references for backward compat
+    private var iconName: String { richIconName }
+    private var iconColor: Color { richIconColor }
+    private var iconGradient: LinearGradient { richIconGradient }
     
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()

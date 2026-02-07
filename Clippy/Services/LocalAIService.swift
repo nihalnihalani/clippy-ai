@@ -13,14 +13,54 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
     @Published var isModelLoaded = false
     @Published var loadingProgress: Double = 0.0
     @Published var statusMessage: String = "Not loaded"
-    
+    @Published var lastUsedTime: Date?
+
     // Model container for LLM
     private var modelContainer: ModelContainer?
-    
+
     // Model configuration - using smaller model for Mac
     private let modelId = "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
-    
-    init() {}
+
+    /// How long the model can sit idle before being unloaded (seconds)
+    private let idleUnloadInterval: TimeInterval = 300 // 5 minutes
+
+    /// Timer that checks for idle unload
+    private var idleCheckTimer: Timer?
+
+    init() {
+        startIdleCheckTimer()
+    }
+
+    deinit {
+        idleCheckTimer?.invalidate()
+    }
+
+    // MARK: - Idle Unload
+
+    private func startIdleCheckTimer() {
+        idleCheckTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkIdleUnload()
+            }
+        }
+    }
+
+    private func checkIdleUnload() {
+        guard let lastUsed = lastUsedTime, modelContainer != nil else { return }
+        if Date().timeIntervalSince(lastUsed) > idleUnloadInterval {
+            Logger.ai.info("Model idle for >\(Int(self.idleUnloadInterval))s, unloading to free memory")
+            unloadModel()
+        }
+    }
+
+    /// Unload the model from memory to reclaim ~1.5GB
+    func unloadModel() {
+        modelContainer = nil
+        isModelLoaded = false
+        loadingProgress = 0.0
+        statusMessage = "Unloaded (idle)"
+        Logger.ai.info("Model unloaded")
+    }
     
     // MARK: - Model Loading
     
@@ -65,13 +105,15 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
     
     /// Generate text completion from a prompt
     private func generate(prompt: String, maxTokens: Int = 512) async -> String? {
+        lastUsedTime = Date()
+
         guard let container = modelContainer else {
             Logger.ai.warning("Model not loaded, loading now...")
             await loadModel()
             guard let container = modelContainer else { return nil }
             return await generateWithContainer(container, prompt: prompt, maxTokens: maxTokens)
         }
-        
+
         return await generateWithContainer(container, prompt: prompt, maxTokens: maxTokens)
     }
     

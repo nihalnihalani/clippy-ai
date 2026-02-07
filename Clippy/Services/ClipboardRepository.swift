@@ -14,22 +14,34 @@ protocol ClipboardRepository {
         imagePath: String?,
         title: String?
     ) async throws -> Item
-    
+
     func deleteItem(_ item: Item) async throws
-    
+
     func updateItem(_ item: Item) async throws
-    
+
     func findDuplicate(content: String) -> Item?
+
+    /// Delete non-favorite items whose expiresAt date has passed.
+    func purgeExpiredItems() async
 }
 
 @MainActor
 class SwiftDataClipboardRepository: ClipboardRepository {
     private let modelContext: ModelContext
     private let vectorService: VectorSearchService // The vector DB service
-    
+    private var purgeTimer: Timer?
+
     init(modelContext: ModelContext, vectorService: VectorSearchService) {
         self.modelContext = modelContext
         self.vectorService = vectorService
+
+        // Purge expired items on launch and every 15 minutes
+        Task { await self.purgeExpiredItems() }
+        self.purgeTimer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.purgeExpiredItems()
+            }
+        }
     }
     
     func saveItem(
@@ -113,5 +125,29 @@ class SwiftDataClipboardRepository: ClipboardRepository {
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         return try? modelContext.fetch(fetchDescriptor).first
+    }
+
+    func purgeExpiredItems() async {
+        let now = Date()
+        let fetchDescriptor = FetchDescriptor<Item>(
+            predicate: #Predicate<Item> { item in
+                item.expiresAt != nil && item.isFavorite == false
+            }
+        )
+
+        guard let expiredCandidates = try? modelContext.fetch(fetchDescriptor) else { return }
+
+        // Filter in-memory since #Predicate doesn't support Date comparison with a captured variable
+        let expired = expiredCandidates.filter { item in
+            guard let expiresAt = item.expiresAt else { return false }
+            return expiresAt < now
+        }
+
+        guard !expired.isEmpty else { return }
+        Logger.clipboard.info("Purging \(expired.count, privacy: .public) expired items")
+
+        for item in expired {
+            try? await deleteItem(item)
+        }
     }
 }

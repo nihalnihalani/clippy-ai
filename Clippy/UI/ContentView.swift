@@ -26,7 +26,9 @@ struct ContentView: View {
     @State private var selectedItems: Set<PersistentIdentifier> = []
     @State private var searchText: String = ""
     @State private var showSettings: Bool = false
-    
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+    @State private var showOnboarding: Bool = false
+
     // AI Processing State
     @State private var thinkingStartTime: Date? // Track when thinking state started
     
@@ -91,6 +93,15 @@ struct ContentView: View {
         }
         .onAppear {
             setupServices()
+            if !hasCompletedOnboarding {
+                showOnboarding = true
+            }
+        }
+        .sheet(isPresented: $showOnboarding) {
+            OnboardingView(selectedAIService: $container.selectedAIServiceType) {
+                hasCompletedOnboarding = true
+                showOnboarding = false
+            }
         }
     }
     
@@ -122,7 +133,18 @@ struct ContentView: View {
         hotkeyManager.startListening(
             onVisionTrigger: { handleVisionHotkeyTrigger() },
             onTextCaptureTrigger: { handleTextCaptureTrigger() },
-            onVoiceCaptureTrigger: { toggleVoiceRecording() }
+            onVoiceCaptureTrigger: { toggleVoiceRecording() },
+            onUndoTrigger: { textCaptureService.undoLastReplacement() },
+            isUndoAvailable: { [weak textCaptureService] in textCaptureService?.canUndo ?? false },
+            onSearchOverlayTrigger: { handleSearchOverlayTrigger() }
+        )
+    }
+
+    private func handleSearchOverlayTrigger() {
+        Logger.ui.info("Search overlay hotkey triggered (Cmd+Shift+V)")
+        container.searchOverlayController.toggle(
+            modelContainer: modelContext.container,
+            container: container
         )
     }
     

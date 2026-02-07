@@ -12,11 +12,24 @@ class HotkeyManager: ObservableObject {
     private var onVisionTrigger: (() -> Void)?
     private var onTextCaptureTrigger: (() -> Void)?
     private var onVoiceCaptureTrigger: (() -> Void)?
+    private var onUndoTrigger: (() -> Void)?
+    private var isUndoAvailable: (() -> Bool)?
+    private var onSearchOverlayTrigger: (() -> Void)?
 
-    func startListening(onVisionTrigger: @escaping () -> Void, onTextCaptureTrigger: @escaping () -> Void, onVoiceCaptureTrigger: @escaping () -> Void) {
+    func startListening(
+        onVisionTrigger: @escaping () -> Void,
+        onTextCaptureTrigger: @escaping () -> Void,
+        onVoiceCaptureTrigger: @escaping () -> Void,
+        onUndoTrigger: (() -> Void)? = nil,
+        isUndoAvailable: (() -> Bool)? = nil,
+        onSearchOverlayTrigger: (() -> Void)? = nil
+    ) {
         self.onVisionTrigger = onVisionTrigger
         self.onTextCaptureTrigger = onTextCaptureTrigger
         self.onVoiceCaptureTrigger = onVoiceCaptureTrigger
+        self.onUndoTrigger = onUndoTrigger
+        self.isUndoAvailable = isUndoAvailable
+        self.onSearchOverlayTrigger = onSearchOverlayTrigger
         
         let eventMask = (1 << CGEventType.keyDown.rawValue)
         
@@ -30,6 +43,17 @@ class HotkeyManager: ObservableObject {
                 
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
                 
+                // Check for Cmd+Shift+V (search overlay trigger)
+                let flags = event.flags
+                let keycode = event.getIntegerValueField(.keyboardEventKeycode)
+                if flags.contains(.maskCommand) && flags.contains(.maskShift) && keycode == 9 { // 9 = V
+                    Logger.services.info("Cmd+Shift+V detected")
+                    DispatchQueue.main.async {
+                        manager.onSearchOverlayTrigger?()
+                    }
+                    return nil // Consume event
+                }
+
                 // Check for Option+X (text capture trigger)
                 if event.flags.contains(.maskAlternate) && event.getIntegerValueField(.keyboardEventKeycode) == 7 { // 7 = X
                     Logger.services.info("Option+X detected")
@@ -56,7 +80,19 @@ class HotkeyManager: ObservableObject {
                     }
                     return nil // Consume event
                 }
-                
+
+                // Check for Cmd+Z (undo last replacement)
+                if event.flags.contains(.maskCommand) && event.getIntegerValueField(.keyboardEventKeycode) == 6 { // 6 = Z
+                    if let isAvailable = manager.isUndoAvailable, isAvailable() {
+                        Logger.services.info("Cmd+Z detected - triggering undo")
+                        DispatchQueue.main.async {
+                            manager.onUndoTrigger?()
+                        }
+                        return nil // Consume event
+                    }
+                    // Pass through normally so native Cmd+Z still works
+                }
+
                 return Unmanaged.passUnretained(event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()

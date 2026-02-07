@@ -6,26 +6,35 @@ import MLXEmbedders
 import os
 
 @MainActor
-class VectorSearchService: ObservableObject {
+class VectorSearchService: ObservableObject, VectorSearching {
     @Published var isInitialized = false
-    @Published var statusMessage = "Initializing embedding service..."
+    @Published var statusMessage = "Waiting for first use..."
 
     private var vectorDB: VecturaMLXKit?
     private var pendingVectorItems: [(UUID, String)] = []
-    
-    func initialize() async {
-        Logger.vector.info("Initializing...")
+    private var isInitializing = false
+
+    /// O(1) lookup from vector IDs to track which documents are indexed
+    private var indexedVectorIds: Set<UUID> = []
+
+    /// Lazily initialize the VectorDB on first use.
+    /// Call sites (addDocument, search) invoke this automatically.
+    private func ensureInitialized() async {
+        guard vectorDB == nil, !isInitializing else { return }
+        isInitializing = true
+        statusMessage = "Initializing embedding service..."
+        Logger.vector.info("Initializing (lazy, on first use)...")
         do {
             let config = VecturaConfig(
                 name: "pastepup-clipboard-v2",
                 dimension: nil as Int? // Auto-detect from model
             )
-            
+
             vectorDB = try await VecturaMLXKit(
                 config: config,
                 modelConfiguration: .qwen3_embedding
             )
-             
+
             isInitialized = true
             statusMessage = "Ready (Qwen3-Embedding-0.6B)"
             Logger.vector.info("Initialized successfully with Qwen3")
@@ -41,6 +50,12 @@ class VectorSearchService: ObservableObject {
             statusMessage = "Failed to initialize: \(error.localizedDescription)"
             Logger.vector.error("Initialization error: \(error.localizedDescription, privacy: .public)")
         }
+        isInitializing = false
+    }
+
+    /// Public initialize kept for backward compatibility; now delegates to lazy init.
+    func initialize() async {
+        await ensureInitialized()
     }
     
     func addDocument(vectorId: UUID, text: String) async {
@@ -48,6 +63,8 @@ class VectorSearchService: ObservableObject {
     }
 
     func addDocuments(items: [(UUID, String)]) async {
+        await ensureInitialized()
+
         guard let vectorDB = vectorDB else {
             // Queue items for indexing once initialization completes
             pendingVectorItems.append(contentsOf: items)
@@ -66,6 +83,7 @@ class VectorSearchService: ObservableObject {
                 texts: texts,
                 ids: ids
             )
+            indexedVectorIds.formUnion(ids)
             Logger.vector.info("Added \(count, privacy: .public) documents to Vector DB")
         } catch {
             Logger.vector.error("Failed to add documents: \(error.localizedDescription, privacy: .public)")
@@ -73,9 +91,11 @@ class VectorSearchService: ObservableObject {
     }
     
     func search(query: String, limit: Int = 10) async -> [(UUID, Float)] {
-        guard let vectorDB = vectorDB else { 
+        await ensureInitialized()
+
+        guard let vectorDB = vectorDB else {
             Logger.vector.warning("Cannot search - vectorDB not initialized")
-            return [] 
+            return []
         }
         
         Logger.vector.info("Searching (limit: \(limit, privacy: .public))")
@@ -101,9 +121,20 @@ class VectorSearchService: ObservableObject {
     
     func deleteDocument(vectorId: UUID) async throws {
         pendingVectorItems.removeAll { $0.0 == vectorId }
+        indexedVectorIds.remove(vectorId)
 
         guard let vectorDB = vectorDB else { return }
 
         try await vectorDB.deleteDocuments(ids: [vectorId])
+    }
+
+    /// O(1) check if a vector ID is indexed.
+    func isIndexed(vectorId: UUID) -> Bool {
+        indexedVectorIds.contains(vectorId)
+    }
+
+    /// Filter a list of vector IDs to only those that are indexed. O(n) where n = input size.
+    func filterIndexed(vectorIds: [UUID]) -> [UUID] {
+        vectorIds.filter { indexedVectorIds.contains($0) }
     }
 }

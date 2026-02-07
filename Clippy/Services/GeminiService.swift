@@ -22,11 +22,14 @@ class GeminiService: ObservableObject, AIServiceProtocol {
     @Published var isProcessing = false
     @Published var lastError: String?
     @Published var lastErrorMessage: String? // User-friendly error message
-    
+
     private var apiKey: String
     private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models"
     private let modelName = "gemini-2.5-flash"
-    
+    private let rateLimiter = TokenBucketRateLimiter(maxTokens: 10, refillRate: 2)
+    private var lastTagRequestTime: Date?
+    private let tagDebounceInterval: TimeInterval = 2.0
+
     init(apiKey: String) {
         self.apiKey = apiKey
     }
@@ -108,14 +111,22 @@ class GeminiService: ObservableObject, AIServiceProtocol {
         appName: String?,
         context: String?
     ) async -> [String] {
+        // Debounce: skip if another tag request came within 2 seconds
+        let now = Date()
+        if let lastTime = lastTagRequestTime, now.timeIntervalSince(lastTime) < tagDebounceInterval {
+            Logger.ai.info("Tag request debounced (within \(self.tagDebounceInterval, privacy: .public)s window)")
+            return []
+        }
+        lastTagRequestTime = now
+
         Logger.ai.info("Generating tags...")
-        
+
         isProcessing = true
         defer { isProcessing = false }
-        
+
         // Build the prompt
         let prompt = buildTaggingPrompt(content: content, appName: appName, context: context)
-        
+
         // Make API call
         guard let tags = await callGemini(prompt: prompt) else {
             Logger.ai.error("Failed to generate tags")
@@ -213,15 +224,13 @@ class GeminiService: ObservableObject, AIServiceProtocol {
         }
 
         Logger.network.info("Sending prompt to Gemini for answer")
-        
-        // Construct request URL (API key sent via header, not query param)
+
         guard let url = URL(string: "\(baseURL)/\(modelName):generateContent") else {
             lastError = "Invalid URL"
             lastErrorMessage = "Configuration error"
             return nil
         }
 
-        // Gemini API Request Body
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -236,98 +245,112 @@ class GeminiService: ObservableObject, AIServiceProtocol {
             ]
         ]
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-        
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-            
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
-                lastError = "Invalid response"
-                lastErrorMessage = "Network error - invalid response"
-                return nil
-            }
-            
-            Logger.network.info("Gemini response status: \(httpResponse.statusCode, privacy: .public)")
-            
-            guard httpResponse.statusCode == 200 else {
-                let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-                lastError = "API Error (\(httpResponse.statusCode)): \(errorMessage)"
-                
-                // Set user-friendly error message
-                switch httpResponse.statusCode {
-                case 400:
-                    lastErrorMessage = "Bad request - check your query"
-                case 401, 403:
-                    lastErrorMessage = "Invalid API key. Check Settings."
-                case 429:
-                    lastErrorMessage = "Rate limited. Try again later."
-                case 500...599:
-                    lastErrorMessage = "Gemini server error. Try again."
+        // Retry loop with exponential backoff on 429
+        let maxRetries = 3
+        let backoffDelays: [Double] = [1, 2, 4]
+
+        for attempt in 0...maxRetries {
+            // Rate limit before each attempt
+            await rateLimiter.acquire()
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    lastError = "Invalid response"
+                    lastErrorMessage = "Network error - invalid response"
+                    return nil
+                }
+
+                Logger.network.info("Gemini response status: \(httpResponse.statusCode, privacy: .public)")
+
+                // Retry on 429
+                if httpResponse.statusCode == 429 && attempt < maxRetries {
+                    let delay = backoffDelays[attempt]
+                    Logger.network.warning("Rate limited (429), retrying in \(delay, privacy: .public)s (attempt \(attempt + 1, privacy: .public)/\(maxRetries, privacy: .public))")
+                    try? await Task.sleep(for: .seconds(delay))
+                    continue
+                }
+
+                guard httpResponse.statusCode == 200 else {
+                    let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    lastError = "API Error (\(httpResponse.statusCode)): \(errorMessage)"
+
+                    switch httpResponse.statusCode {
+                    case 400:
+                        lastErrorMessage = "Bad request - check your query"
+                    case 401, 403:
+                        lastErrorMessage = "Invalid API key. Check Settings."
+                    case 429:
+                        lastErrorMessage = "Rate limited. Try again later."
+                    case 500...599:
+                        lastErrorMessage = "Gemini server error. Try again."
+                    default:
+                        lastErrorMessage = "API error (\(httpResponse.statusCode))"
+                    }
+
+                    Logger.network.error("API error: \(errorMessage, privacy: .private)")
+                    return nil
+                }
+
+                // Clear any previous errors on success
+                lastErrorMessage = nil
+
+                let decoder = JSONDecoder()
+                let apiResponse = try decoder.decode(GeminiAPIResponse.self, from: data)
+
+                guard let text = apiResponse.candidates?.first?.content?.parts?.first?.text else {
+                    lastError = "No content in response"
+                    return nil
+                }
+
+                let cleanText = cleanMarkdownJSON(text)
+
+                if let jsonData = cleanText.data(using: .utf8),
+                   let jsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                    let answer = (jsonObject["A"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let pasteImage = jsonObject["paste_image"] as? Int
+
+                    if let pasteImage = pasteImage, pasteImage > 0 {
+                        Logger.ai.info("Image paste detected: item \(pasteImage, privacy: .public)")
+                        return (answer, pasteImage)
+                    } else {
+                        return (answer, nil)
+                    }
+                }
+
+                return (text.trimmingCharacters(in: .whitespacesAndNewlines), nil)
+
+            } catch let error as URLError {
+                lastError = error.localizedDescription
+                switch error.code {
+                case .notConnectedToInternet:
+                    lastErrorMessage = "No internet connection"
+                case .timedOut:
+                    lastErrorMessage = "Request timed out. Try again."
+                case .networkConnectionLost:
+                    lastErrorMessage = "Connection lost. Try again."
                 default:
-                    lastErrorMessage = "API error (\(httpResponse.statusCode))"
+                    lastErrorMessage = "Network error. Check connection."
                 }
-                
-                Logger.network.error("API error: \(errorMessage, privacy: .private)")
+                Logger.network.error("Network error: \(error.localizedDescription, privacy: .public)")
+                return nil
+            } catch {
+                lastError = error.localizedDescription
+                lastErrorMessage = "Something went wrong. Try again."
+                Logger.network.error("Error: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
-
-            // Clear any previous errors on success
-            lastErrorMessage = nil
-            
-            // Parse response
-            let decoder = JSONDecoder()
-            let apiResponse = try decoder.decode(GeminiAPIResponse.self, from: data)
-            
-            guard let text = apiResponse.candidates?.first?.content?.parts?.first?.text else {
-                lastError = "No content in response"
-                return nil
-            }
-
-            let cleanText = cleanMarkdownJSON(text)
-
-            // Parse the JSON to extract both answer and paste_image
-            if let jsonData = cleanText.data(using: .utf8),
-               let jsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                let answer = (jsonObject["A"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let pasteImage = jsonObject["paste_image"] as? Int
-                
-                if let pasteImage = pasteImage, pasteImage > 0 {
-                    Logger.ai.info("Image paste detected: item \(pasteImage, privacy: .public)")
-                    return (answer, pasteImage)
-                } else {
-                    return (answer, nil)
-                }
-            }
-            
-            // Fallback
-            return (text.trimmingCharacters(in: .whitespacesAndNewlines), nil)
-            
-        } catch let error as URLError {
-            lastError = error.localizedDescription
-            // User-friendly network error messages
-            switch error.code {
-            case .notConnectedToInternet:
-                lastErrorMessage = "No internet connection"
-            case .timedOut:
-                lastErrorMessage = "Request timed out. Try again."
-            case .networkConnectionLost:
-                lastErrorMessage = "Connection lost. Try again."
-            default:
-                lastErrorMessage = "Network error. Check connection."
-            }
-            Logger.network.error("Network error: \(error.localizedDescription, privacy: .public)")
-            return nil
-        } catch {
-            lastError = error.localizedDescription
-            lastErrorMessage = "Something went wrong. Try again."
-            Logger.network.error("Error: \(error.localizedDescription, privacy: .public)")
-            return nil
         }
+
+        return nil
     }
 
     private func callGemini(prompt: String) async -> [String]? {
@@ -337,7 +360,7 @@ class GeminiService: ObservableObject, AIServiceProtocol {
         }
 
         Logger.network.info("Sending prompt to Gemini for tagging")
-        
+
         guard let url = URL(string: "\(baseURL)/\(modelName):generateContent") else {
             lastError = "Invalid URL"
             return nil
@@ -357,56 +380,70 @@ class GeminiService: ObservableObject, AIServiceProtocol {
             ]
         ]
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        let maxRetries = 3
+        let backoffDelays: [Double] = [1, 2, 4]
 
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        for attempt in 0...maxRetries {
+            await rateLimiter.acquire()
 
-            let (data, response) = try await URLSession.shared.data(for: request)
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
 
-            guard let httpResponse = response as? HTTPURLResponse else {
-                lastError = "Invalid response"
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    lastError = "Invalid response"
+                    return nil
+                }
+
+                Logger.network.info("Tagging response status: \(httpResponse.statusCode, privacy: .public)")
+
+                if httpResponse.statusCode == 429 && attempt < maxRetries {
+                    let delay = backoffDelays[attempt]
+                    Logger.network.warning("Tag rate limited (429), retrying in \(delay, privacy: .public)s (attempt \(attempt + 1, privacy: .public)/\(maxRetries, privacy: .public))")
+                    try? await Task.sleep(for: .seconds(delay))
+                    continue
+                }
+
+                guard httpResponse.statusCode == 200 else {
+                    lastError = "API Error (\(httpResponse.statusCode))"
+                    Logger.network.error("Tagging API error: \(httpResponse.statusCode, privacy: .public)")
+                    return nil
+                }
+
+                let decoder = JSONDecoder()
+                let apiResponse = try decoder.decode(GeminiAPIResponse.self, from: data)
+
+                guard let text = apiResponse.candidates?.first?.content?.parts?.first?.text else {
+                    lastError = "No content in response"
+                    return nil
+                }
+
+                let cleanText = cleanMarkdownJSON(text)
+
+                if let jsonData = cleanText.data(using: .utf8),
+                   let jsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                   let tagsArray = jsonObject["tags"] as? [String] {
+                    let tags = tagsArray.map { $0.lowercased() }.filter { !$0.isEmpty }
+                    Logger.ai.info("Parsed JSON tags: \(tags, privacy: .private)")
+                    return tags
+                }
+
+                return []
+
+            } catch {
+                lastError = error.localizedDescription
+                Logger.network.error("Error: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
-
-            Logger.network.info("Tagging response status: \(httpResponse.statusCode, privacy: .public)")
-
-            guard httpResponse.statusCode == 200 else {
-                lastError = "API Error (\(httpResponse.statusCode))"
-                Logger.network.error("Tagging API error: \(httpResponse.statusCode, privacy: .public)")
-                return nil
-            }
-
-            // Parse response
-            let decoder = JSONDecoder()
-            let apiResponse = try decoder.decode(GeminiAPIResponse.self, from: data)
-
-            guard let text = apiResponse.candidates?.first?.content?.parts?.first?.text else {
-                lastError = "No content in response"
-                return nil
-            }
-            
-            let cleanText = cleanMarkdownJSON(text)
-
-            // Try parsing as JSON first
-            if let jsonData = cleanText.data(using: .utf8),
-               let jsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-               let tagsArray = jsonObject["tags"] as? [String] {
-                let tags = tagsArray.map { $0.lowercased() }.filter { !$0.isEmpty }
-                Logger.ai.info("Parsed JSON tags: \(tags, privacy: .private)")
-                return tags
-            }
-            
-            return []
-            
-        } catch {
-            lastError = error.localizedDescription
-            Logger.network.error("Error: \(error.localizedDescription, privacy: .public)")
-            return nil
         }
+
+        return nil
     }
 
     /// Analyze image and return a summary description

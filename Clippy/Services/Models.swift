@@ -6,6 +6,9 @@ import SwiftData
 enum AIServiceType: String, CaseIterable {
     case gemini = "Gemini"
     case local = "Local AI"
+    case claude = "Claude"
+    case openai = "OpenAI"
+    case ollama = "Ollama"
 
     var description: String {
         switch self {
@@ -13,6 +16,12 @@ enum AIServiceType: String, CaseIterable {
             return "Gemini 2.5 Flash (Cloud)"
         case .local:
             return "Local Qwen3-4b (On-device)"
+        case .claude:
+            return "Claude Sonnet 4.5 (Cloud)"
+        case .openai:
+            return "GPT-4o Mini (Cloud)"
+        case .ollama:
+            return "Ollama (Local)"
         }
     }
 }
@@ -32,18 +41,26 @@ final class Item {
     var imagePath: String? // Path to saved image file (for image clipboard items)
     var isFavorite: Bool = false
 
+    /// Optional expiry date for auto-cleanup (e.g., sensitive items expire after 1 hour)
+    var expiresAt: Date?
+
+    /// Persisted sensitive content flag, set at save time to avoid re-computing each render
+    var isSensitiveFlag: Bool = false
+
     /// Cached result of sensitive content detection (not persisted).
     @Transient var _sensitiveCache: Bool?
 
     /// True if content matches sensitive patterns (API keys, credit cards, SSNs, etc.)
+    /// Reads from persisted `isSensitiveFlag` first, then falls back to runtime detection.
     var isSensitive: Bool {
+        if isSensitiveFlag { return true }
         if let cached = _sensitiveCache { return cached }
         let result = SensitiveContentDetector.isSensitive(content)
         _sensitiveCache = result
         return result
     }
 
-    init(timestamp: Date, content: String = "", title: String? = nil, appName: String? = nil, contentType: String = "text", imagePath: String? = nil, isFavorite: Bool = false) {
+    init(timestamp: Date, content: String = "", title: String? = nil, appName: String? = nil, contentType: String = "text", imagePath: String? = nil, isFavorite: Bool = false, expiresAt: Date? = nil, isSensitiveFlag: Bool = false) {
         self.timestamp = timestamp
         self.content = content
         self.title = title
@@ -53,6 +70,8 @@ final class Item {
         self.tags = []
         self.imagePath = imagePath
         self.isFavorite = isFavorite
+        self.expiresAt = expiresAt
+        self.isSensitiveFlag = isSensitiveFlag
     }
 }
 
