@@ -3,16 +3,18 @@ import SwiftData
 import VecturaMLXKit
 import VecturaKit
 import MLXEmbedders
+import os
 
 @MainActor
-class Clippy: ObservableObject {
+class VectorSearchService: ObservableObject {
     @Published var isInitialized = false
     @Published var statusMessage = "Initializing embedding service..."
-    
+
     private var vectorDB: VecturaMLXKit?
+    private var pendingVectorItems: [(UUID, String)] = []
     
     func initialize() async {
-        print("🚀 [Clippy] Initializing...")
+        Logger.vector.info("Initializing...")
         do {
             let config = VecturaConfig(
                 name: "pastepup-clipboard-v2",
@@ -26,25 +28,35 @@ class Clippy: ObservableObject {
              
             isInitialized = true
             statusMessage = "Ready (Qwen3-Embedding-0.6B)"
-            print("✅ [Clippy] Initialized successfully with Qwen3")
+            Logger.vector.info("Initialized successfully with Qwen3")
+
+            // Flush any items that were queued before initialization completed
+            if !pendingVectorItems.isEmpty {
+                let itemsToFlush = pendingVectorItems
+                pendingVectorItems.removeAll()
+                Logger.vector.info("Flushing \(itemsToFlush.count, privacy: .public) pending vector items")
+                await addDocuments(items: itemsToFlush)
+            }
         } catch {
             statusMessage = "Failed to initialize: \(error.localizedDescription)"
-            print("❌ [Clippy] Initialization error: \(error)")
+            Logger.vector.error("Initialization error: \(error.localizedDescription, privacy: .public)")
         }
     }
     
     func addDocument(vectorId: UUID, text: String) async {
         await addDocuments(items: [(vectorId, text)])
     }
-    
+
     func addDocuments(items: [(UUID, String)]) async {
-        guard let vectorDB = vectorDB else { 
-            print("⚠️ [Clippy] Cannot add documents - vectorDB not initialized")
-            return 
+        guard let vectorDB = vectorDB else {
+            // Queue items for indexing once initialization completes
+            pendingVectorItems.append(contentsOf: items)
+            Logger.vector.info("Queued \(items.count, privacy: .public) items for later indexing (vectorDB not ready)")
+            return
         }
         
         let count = items.count
-        print("📝 [Clippy] Adding \(count) documents...")
+        Logger.vector.info("Adding \(count, privacy: .public) documents")
         
         do {
             let texts = items.map { $0.1 }
@@ -54,19 +66,19 @@ class Clippy: ObservableObject {
                 texts: texts,
                 ids: ids
             )
-            print("   ✅ Added \(count) documents to Vector DB")
+            Logger.vector.info("Added \(count, privacy: .public) documents to Vector DB")
         } catch {
-            print("   ❌ Failed to add documents: \(error)")
+            Logger.vector.error("Failed to add documents: \(error.localizedDescription, privacy: .public)")
         }
     }
     
     func search(query: String, limit: Int = 10) async -> [(UUID, Float)] {
         guard let vectorDB = vectorDB else { 
-            print("⚠️ [Clippy] Cannot search - vectorDB not initialized")
+            Logger.vector.warning("Cannot search - vectorDB not initialized")
             return [] 
         }
         
-        print("🔎 [Clippy] Searching for: '\(query)' (limit: \(limit))")
+        Logger.vector.info("Searching (limit: \(limit, privacy: .public))")
         
         do {
             let results = try await vectorDB.search(
@@ -75,21 +87,23 @@ class Clippy: ObservableObject {
                 threshold: nil // No threshold, we'll rank ourselves
             )
             
-            print("   ✅ Found \(results.count) results")
+            Logger.vector.info("Found \(results.count, privacy: .public) results")
             for (index, result) in results.prefix(5).enumerated() {
-                print("      \(index + 1). ID: \(result.id), Score: \(String(format: "%.3f", result.score))")
+                Logger.vector.debug("\(index + 1, privacy: .public). ID: \(result.id, privacy: .private), Score: \(String(format: "%.3f", result.score), privacy: .public)")
             }
             
             return results.map { ($0.id, $0.score) }
         } catch {
-            print("   ❌ Search error: \(error)")
+            Logger.vector.error("Search error: \(error.localizedDescription, privacy: .public)")
             return []
         }
     }
     
     func deleteDocument(vectorId: UUID) async throws {
+        pendingVectorItems.removeAll { $0.0 == vectorId }
+
         guard let vectorDB = vectorDB else { return }
-        
+
         try await vectorDB.deleteDocuments(ids: [vectorId])
     }
 }

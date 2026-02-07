@@ -1,10 +1,11 @@
 import Foundation
 import SwiftData
+import os
 
 @MainActor
 class AppDependencyContainer: ObservableObject {
     // Core Services
-    let clippy: Clippy
+    let vectorSearch: VectorSearchService
     let clipboardMonitor: ClipboardMonitor
     let contextEngine: ContextEngine
     let visionParser: VisionScreenParser
@@ -16,19 +17,12 @@ class AppDependencyContainer: ObservableObject {
     let localAIService: LocalAIService
     let geminiService: GeminiService
     let audioRecorder: AudioRecorder
+    let queryOrchestrator: QueryOrchestrator
     
     /// Currently selected AI service (persisted in UserDefaults)
-    @Published var selectedAIServiceType: AIServiceType = .local {
+    @Published var selectedAIServiceType: AIServiceType {
         didSet {
             UserDefaults.standard.set(selectedAIServiceType.rawValue, forKey: "SelectedAIService")
-        }
-    }
-    
-    /// Unified AI service access - returns the currently selected service
-    var aiService: any AIServiceProtocol {
-        switch selectedAIServiceType {
-        case .local: return localAIService
-        case .gemini: return geminiService
         }
     }
     
@@ -36,30 +30,43 @@ class AppDependencyContainer: ObservableObject {
     var repository: ClipboardRepository?
     
     init() {
-        print("🏗️ [AppDependencyContainer] Initializing services...")
-        
+        Logger.services.info("Initializing services...")
+
+        // Load persisted AI service selection
+        if let saved = UserDefaults.standard.string(forKey: "SelectedAIService"),
+           let savedType = AIServiceType(rawValue: saved) {
+            self.selectedAIServiceType = savedType
+        } else {
+            self.selectedAIServiceType = .local
+        }
+
         // 1. Initialize Independent Services
-        self.clippy = Clippy()
+        self.vectorSearch = VectorSearchService()
         self.contextEngine = ContextEngine()
         self.visionParser = VisionScreenParser()
         self.hotkeyManager = HotkeyManager()
         self.clippyController = ClippyWindowController()
         self.audioRecorder = AudioRecorder()
         self.localAIService = LocalAIService()
-        self.geminiService = GeminiService(apiKey: UserDefaults.standard.string(forKey: "Gemini_API_Key") ?? "")
+        self.geminiService = GeminiService(apiKey: KeychainHelper.load(key: "Gemini_API_Key") ?? "")
         self.textCaptureService = TextCaptureService()
-        
+
         // 2. Initialize Dependent Services
         self.clipboardMonitor = ClipboardMonitor()
+        self.queryOrchestrator = QueryOrchestrator(
+            vectorSearch: vectorSearch,
+            geminiService: geminiService,
+            localAIService: localAIService
+        )
         
-        print("✅ [AppDependencyContainer] Services initialized.")
+        Logger.services.info("Services initialized.")
     }
     
     func inject(modelContext: ModelContext) {
-        print("💉 [AppDependencyContainer] Injecting ModelContext and Cross-Service Dependencies...")
+        Logger.services.info("Injecting ModelContext and cross-service dependencies")
         
         // Initialize Repository
-        self.repository = SwiftDataClipboardRepository(modelContext: modelContext, vectorService: clippy)
+        self.repository = SwiftDataClipboardRepository(modelContext: modelContext, vectorService: vectorSearch)
         
         // Inject dependencies into ClipboardMonitor
         if let repo = self.repository {

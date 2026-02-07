@@ -2,6 +2,7 @@ import Foundation
 import MLXLLM
 import MLXLMCommon
 import MLX
+import os
 
 /// Native Local AI Service using MLX-Swift for in-process LLM inference.
 /// No external Python servers required - runs entirely on Apple Silicon.
@@ -26,11 +27,11 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
     /// Load the LLM model into memory
     func loadModel() async {
         guard modelContainer == nil else {
-            print("✅ [LocalAIService] Model already loaded")
+            Logger.ai.info("Model already loaded")
             return
         }
         
-        print("🔄 [LocalAIService] Loading model: \(modelId)")
+        Logger.ai.info("Loading model: \(self.modelId, privacy: .public)")
         statusMessage = "Downloading model..."
         isProcessing = true
         
@@ -49,10 +50,10 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
             
             isModelLoaded = true
             statusMessage = "Ready (Qwen2.5-1.5B)"
-            print("✅ [LocalAIService] Model loaded successfully")
+            Logger.ai.info("Model loaded successfully")
             
         } catch {
-            print("❌ [LocalAIService] Failed to load model: \(error)")
+            Logger.ai.error("Failed to load model: \(error.localizedDescription, privacy: .public)")
             lastError = error.localizedDescription
             statusMessage = "Failed: \(error.localizedDescription)"
         }
@@ -65,7 +66,7 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
     /// Generate text completion from a prompt
     private func generate(prompt: String, maxTokens: Int = 512) async -> String? {
         guard let container = modelContainer else {
-            print("⚠️ [LocalAIService] Model not loaded, loading now...")
+            Logger.ai.warning("Model not loaded, loading now...")
             await loadModel()
             guard let container = modelContainer else { return nil }
             return await generateWithContainer(container, prompt: prompt, maxTokens: maxTokens)
@@ -93,7 +94,7 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
             return result.output
             
         } catch {
-            print("❌ [LocalAIService] Generation error: \(error)")
+            Logger.ai.error("Generation error: \(error.localizedDescription, privacy: .public)")
             lastError = error.localizedDescription
             return nil
         }
@@ -107,7 +108,7 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
         clipboardContext: [RAGContextItem],
         appName: String?
     ) async -> String? {
-        print("🤖 [LocalAIService] Generating RAG answer...")
+        Logger.ai.info("Generating RAG answer")
         isProcessing = true
         defer { isProcessing = false }
         
@@ -139,7 +140,7 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
         clipboardContext: [RAGContextItem],
         appName: String?
     ) -> AsyncThrowingStream<String, Error> {
-        print("🤖 [LocalAIService] Generating Streaming answer...")
+        Logger.ai.info("Generating streaming answer")
         
         let contextText = buildContextString(clipboardContext)
         let prompt = """
@@ -203,7 +204,7 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
     
     /// Analyze image - placeholder (would need MLXVLM)
     func analyzeImage(imageData: Data) async -> String? {
-        print("⚠️ [LocalAIService] Vision not implemented in pure Swift mode")
+        Logger.ai.warning("Vision not implemented in pure Swift mode")
         return "Image analysis requires vision model"
     }
     

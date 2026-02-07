@@ -1,6 +1,22 @@
 import Foundation
 import SwiftData
 
+// MARK: - AI Service Type
+
+enum AIServiceType: String, CaseIterable {
+    case gemini = "Gemini"
+    case local = "Local AI"
+
+    var description: String {
+        switch self {
+        case .gemini:
+            return "Gemini 2.5 Flash (Cloud)"
+        case .local:
+            return "Local Qwen3-4b (On-device)"
+        }
+    }
+}
+
 // MARK: - Item Model
 
 @Model
@@ -15,7 +31,18 @@ final class Item {
     var tags: [String] // AI-generated semantic tags for better retrieval
     var imagePath: String? // Path to saved image file (for image clipboard items)
     var isFavorite: Bool = false
-    
+
+    /// Cached result of sensitive content detection (not persisted).
+    @Transient var _sensitiveCache: Bool?
+
+    /// True if content matches sensitive patterns (API keys, credit cards, SSNs, etc.)
+    var isSensitive: Bool {
+        if let cached = _sensitiveCache { return cached }
+        let result = SensitiveContentDetector.isSensitive(content)
+        _sensitiveCache = result
+        return result
+    }
+
     init(timestamp: Date, content: String = "", title: String? = nil, appName: String? = nil, contentType: String = "text", imagePath: String? = nil, isFavorite: Bool = false) {
         self.timestamp = timestamp
         self.content = content
@@ -27,6 +54,16 @@ final class Item {
         self.imagePath = imagePath
         self.isFavorite = isFavorite
     }
+}
+
+// MARK: - Input Mode
+
+/// Represents the active input capture mode for the assistant
+enum InputMode {
+    case none
+    case textCapture // Option+X
+    case voiceCapture // Option+Space
+    case visionCapture // Option+V
 }
 
 // MARK: - Clippy Animation State

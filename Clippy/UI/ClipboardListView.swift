@@ -24,45 +24,7 @@ struct ClipboardListView: View {
                 if searchText.isEmpty {
                     // Normal List View
                     ForEach(filteredItems) { item in
-                        ClipboardItemRow(item: item, isSelected: selectedItems.contains(item.persistentModelID))
-                            .tag(item)
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                            .contextMenu {
-                                Button {
-                                    copyToClipboard(item)
-                                } label: {
-                                    Label("Copy", systemImage: "doc.on.doc")
-                                }
-                                
-                                Divider()
-                                
-                                Button {
-                                    performTransform(item, instruction: "Fix grammar and spelling.")
-                                } label: {
-                                    Label("Fix Grammar", systemImage: "text.badge.checkmark")
-                                }
-                                
-                                Button {
-                                    performTransform(item, instruction: "Summarize this text in one sentence.")
-                                } label: {
-                                    Label("Summarize", systemImage: "text.quote")
-                                }
-                                
-                                Button {
-                                    performTransform(item, instruction: "Convert this to valid JSON.")
-                                } label: {
-                                    Label("To JSON", systemImage: "curlybraces")
-                                }
-                                
-                                Divider()
-                                
-                                Button(role: .destructive) {
-                                    deleteItem(item)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+                        clipboardRow(for: item)
                     }
                 } else {
                     // Search Results View
@@ -81,45 +43,7 @@ struct ClipboardListView: View {
                             .listRowBackground(Color.clear)
                     } else {
                         ForEach(searchResults) { item in
-                            ClipboardItemRow(item: item, isSelected: selectedItems.contains(item.persistentModelID))
-                                .tag(item)
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                                .contextMenu {
-                                    Button {
-                                        copyToClipboard(item)
-                                    } label: {
-                                        Label("Copy", systemImage: "doc.on.doc")
-                                    }
-                                    
-                                    Divider()
-                                    
-                                    Button {
-                                        performTransform(item, instruction: "Fix grammar and spelling.")
-                                    } label: {
-                                        Label("Fix Grammar", systemImage: "text.badge.checkmark")
-                                    }
-                                    
-                                    Button {
-                                        performTransform(item, instruction: "Summarize this text in one sentence.")
-                                    } label: {
-                                        Label("Summarize", systemImage: "text.quote")
-                                    }
-                                    
-                                    Button {
-                                        performTransform(item, instruction: "Convert this to valid JSON.")
-                                    } label: {
-                                        Label("To JSON", systemImage: "curlybraces")
-                                    }
-                                    
-                                    Divider()
-                                    
-                                    Button(role: .destructive) {
-                                        deleteItem(item)
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
+                            clipboardRow(for: item)
                         }
                     }
                 }
@@ -162,7 +86,7 @@ struct ClipboardListView: View {
                 if Task.isCancelled { return }
                 
                 // 1. Perform semantic search
-                let results = await container.clippy.search(query: newValue, limit: 20)
+                let results = await container.vectorSearch.search(query: newValue, limit: 20)
                 
                 if Task.isCancelled { return }
                 
@@ -194,8 +118,53 @@ struct ClipboardListView: View {
         return allItems
     }
     
+    // MARK: - Shared Row Builder
+
+    @ViewBuilder
+    private func clipboardRow(for item: Item) -> some View {
+        ClipboardItemRow(item: item, isSelected: selectedItems.contains(item.persistentModelID))
+            .tag(item)
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .contextMenu {
+                Button {
+                    copyToClipboard(item)
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+
+                Divider()
+
+                Button {
+                    performTransform(item, instruction: "Fix grammar and spelling.")
+                } label: {
+                    Label("Fix Grammar", systemImage: "text.badge.checkmark")
+                }
+
+                Button {
+                    performTransform(item, instruction: "Summarize this text in one sentence.")
+                } label: {
+                    Label("Summarize", systemImage: "text.quote")
+                }
+
+                Button {
+                    performTransform(item, instruction: "Convert this to valid JSON.")
+                } label: {
+                    Label("To JSON", systemImage: "curlybraces")
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    deleteItem(item)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+    }
+
     // MARK: - Helper Methods
-    
+
     private func performTransform(_ item: Item, instruction: String) {
         Task {
             guard let result = await container.localAIService.transformText(text: item.content, instruction: instruction) else { return }
@@ -215,7 +184,7 @@ struct ClipboardListView: View {
         // but modelContext deletion is propagated via NotificationCenter if setup, or we rely on next app launch sync.
         // For now, this suffices for UI.
         Task {
-             try? await container.clippy.deleteDocument(vectorId: item.vectorId ?? UUID())
+             try? await container.vectorSearch.deleteDocument(vectorId: item.vectorId ?? UUID())
         }
     }
 }
@@ -341,10 +310,14 @@ struct ClipboardItemRow: View {
         }
     }
     
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+
     private func timeAgo(from date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

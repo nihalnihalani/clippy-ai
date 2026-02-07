@@ -1,19 +1,6 @@
 import SwiftUI
 import SwiftData
-
-enum AIServiceType: String, CaseIterable {
-    case gemini = "Gemini"
-    case local = "Local AI"
-    
-    var description: String {
-        switch self {
-        case .gemini:
-            return "Gemini 2.5 Flash (Cloud)"
-        case .local:
-            return "Local Qwen3-4b (On-device)"
-        }
-    }
-}
+import os
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -21,14 +8,12 @@ struct ContentView: View {
     
     // Derived properties for cleaner access (optional, but helps avoid massive find/replace)
     private var clipboardMonitor: ClipboardMonitor { container.clipboardMonitor }
-    private var clippy: Clippy { container.clippy }
+    private var vectorSearch: VectorSearchService { container.vectorSearch }
     private var hotkeyManager: HotkeyManager { container.hotkeyManager }
     private var visionParser: VisionScreenParser { container.visionParser }
     private var textCaptureService: TextCaptureService { container.textCaptureService }
     private var clippyController: ClippyWindowController { container.clippyController }
     private var localAIService: LocalAIService { container.localAIService }
-    // GeminiService is currently a @State in ContentView, but moved to container. 
-    // We'll use the container one, but we need to verify if we need to observe it.
     private var geminiService: GeminiService { container.geminiService }
     private var audioRecorder: AudioRecorder { container.audioRecorder }
 
@@ -41,11 +26,8 @@ struct ContentView: View {
     @State private var selectedItems: Set<PersistentIdentifier> = []
     @State private var searchText: String = ""
     @State private var showSettings: Bool = false
-    @State private var selectedAIService: AIServiceType = .local // Default to Local
     
     // AI Processing State
-    @State private var isProcessingAnswer: Bool = false
-    @State private var lastCapturedText: String = ""
     @State private var thinkingStartTime: Date? // Track when thinking state started
     
     // Items Query for context (we still need this for AI context even if list has its own query)
@@ -55,7 +37,7 @@ struct ContentView: View {
         NavigationSplitView {
             SidebarView(
                 selection: $selectedCategory,
-                selectedAIService: $selectedAIService,
+                selectedAIService: $container.selectedAIServiceType,
                 clippyController: clippyController,
                 showSettings: $showSettings
             )
@@ -88,9 +70,9 @@ struct ContentView: View {
                     set: { saveAPIKey($0) }
                 ),
                 elevenLabsKey: Binding(
-                    get: { UserDefaults.standard.string(forKey: "ElevenLabs_API_Key") ?? "" },
-                    set: { 
-                        UserDefaults.standard.set($0, forKey: "ElevenLabs_API_Key")
+                    get: { KeychainHelper.load(key: "ElevenLabs_API_Key") ?? "" },
+                    set: {
+                        KeychainHelper.save(key: "ElevenLabs_API_Key", value: $0)
                         if !$0.isEmpty {
                             elevenLabsService = ElevenLabsService(apiKey: $0)
                         } else {
@@ -98,36 +80,23 @@ struct ContentView: View {
                         }
                     }
                 ),
-                selectedService: $selectedAIService
+                selectedService: $container.selectedAIServiceType
             )
-        }
-        .onChange(of: selectedAIService) { _, newValue in
-            UserDefaults.standard.set(newValue.rawValue, forKey: "SelectedAIService")
         }
         .onChange(of: clipboardMonitor.hasAccessibilityPermission) { _, granted in
             if granted && !hotkeyManager.isListening {
-                print("🔓 [ContentView] Permissions granted, restarting HotkeyManager...")
+                Logger.ui.info("Permissions granted, restarting HotkeyManager")
                 startHotkeys()
             }
         }
         .onAppear {
             setupServices()
         }
-        .onDisappear {
-            clipboardMonitor.stopMonitoring()
-            hotkeyManager.stopListening()
-        }
     }
     
     // MARK: - Setup & Services
     
     private func setupServices() {
-        // Load stored AI service selection
-        if let savedServiceString = UserDefaults.standard.string(forKey: "SelectedAIService"),
-           let savedService = AIServiceType(rawValue: savedServiceString) {
-            selectedAIService = savedService
-        }
-        
         // Load stored API key
         let storedKey = getStoredAPIKey()
         if !storedKey.isEmpty {
@@ -142,7 +111,7 @@ struct ContentView: View {
         
         Task {
             // Initialize Vector DB
-            await clippy.initialize()
+            await vectorSearch.initialize()
         }
         
         // Start hotkeys on main thread (required for CGEvent tap)
@@ -150,28 +119,15 @@ struct ContentView: View {
     }
     
     private func startHotkeys() {
-        print("⌨️ [ContentView] Starting hotkey listener...")
         hotkeyManager.startListening(
-            onTrigger: { handleHotkeyTrigger() },
             onVisionTrigger: { handleVisionHotkeyTrigger() },
             onTextCaptureTrigger: { handleTextCaptureTrigger() },
             onVoiceCaptureTrigger: { toggleVoiceRecording() }
         )
-        print("⌨️ [ContentView] Hotkey listener started: \(hotkeyManager.isListening)")
     }
-    
-    // MARK: - Logic Handlers
-
     
     // MARK: - Input Mode Management
-    
-    enum InputMode {
-        case none
-        case textCapture // Option+X
-        case voiceCapture // Option+Space
-        case visionCapture // Option+V
-    }
-    
+
     @State private var activeInputMode: InputMode = .none
     
     private func resetInputState() {
@@ -193,36 +149,30 @@ struct ContentView: View {
         }
         
         activeInputMode = .none
-        isProcessingAnswer = false
         thinkingStartTime = nil
     }
     
-    private func handleHotkeyTrigger() {
-        print("\n🔥 [ContentView] Hotkey triggered (Option+S)")
-        // Legacy suggestions removed. This hotkey is currently free or can be reassigned.
-        resetInputState()
-    }
-    
     private func handleVisionHotkeyTrigger() {
-        print("\n👁️ [ContentView] Vision hotkey triggered (Option+V)")
-        
+        Logger.ui.info("Vision hotkey triggered (Option+V)")
+
         // Vision is a one-shot action, but we should still reset other modes
         resetInputState()
         activeInputMode = .visionCapture
-        
+
         clippyController.setState(.thinking, message: "Capturing screen... 📸")
-        
-        visionParser.parseCurrentScreen { result in
-            DispatchQueue.main.async {
+
+        Task {
+            let result = await visionParser.parseCurrentScreen()
+
+            await MainActor.run {
                 switch result {
                 case .success(let parsedContent):
-                    print("✅ Vision parsing successful!")
-                    print("   Extracted \(parsedContent.fullText.count) characters")
+                    Logger.ui.info("Vision parsing successful - extracted \(parsedContent.fullText.count, privacy: .public) characters")
                     if !parsedContent.fullText.isEmpty {
                         // If we have image data and Local AI is selected, generate a description
-                        if self.selectedAIService == .local, let imageData = parsedContent.imageData {
+                        if self.container.selectedAIServiceType == .local, let imageData = parsedContent.imageData {
                             self.clippyController.setState(.thinking, message: "Analyzing image... 🧠")
-                            
+
                             Task {
                                 let base64Image = imageData.base64EncodedString()
                                 if let description = await self.localAIService.generateVisionDescription(base64Image: base64Image) {
@@ -245,8 +195,8 @@ struct ContentView: View {
                         self.clippyController.setState(.error, message: "No text found 👀")
                     }
                 case .failure(let error):
-                    print("❌ Vision parsing failed: \(error.localizedDescription)")
-                    
+                    Logger.ui.error("Vision parsing failed: \(error.localizedDescription, privacy: .public)")
+
                     // Check if it's a permission error
                     if case VisionParserError.screenCaptureFailed = error {
                         self.clippyController.setState(.error, message: "Need Screen Recording permission 🔐")
@@ -260,7 +210,7 @@ struct ContentView: View {
                         self.clippyController.setState(.error, message: "Vision failed: \(error.localizedDescription)")
                     }
                 }
-                
+
                 // Reset mode after short delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     if self.activeInputMode == .visionCapture {
@@ -289,15 +239,15 @@ struct ContentView: View {
                     imagePath: nil,
                     title: nil
                 )
-                print("💾 [ContentView] Vision content saved via Repository")
+                Logger.ui.info("Vision content saved via Repository")
             } catch {
-                print("❌ [ContentView] Failed to save vision content: \(error)")
+                Logger.ui.error("Failed to save vision content: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
     
     private func handleTextCaptureTrigger() {
-        print("\n⌨️ [ContentView] Text capture hotkey triggered (Option+X)")
+        Logger.ui.info("Text capture hotkey triggered (Option+X)")
         
         if activeInputMode == .textCapture {
             // Second press: Stop capturing and start thinking
@@ -322,7 +272,6 @@ struct ContentView: View {
                     self.clippyController.setState(.writing)
                 },
                 onComplete: { capturedText in
-                    self.lastCapturedText = capturedText
                     self.processCapturedText(capturedText)
                 }
             )
@@ -330,108 +279,33 @@ struct ContentView: View {
     }
     
     private func processCapturedText(_ capturedText: String) {
-        print("\n🎯 [ContentView] Processing captured text...")
-        isProcessingAnswer = true
-        
+        Logger.ui.info("Processing captured text")
+
         // Ensure thinking state is set and time is recorded
         if thinkingStartTime == nil {
             thinkingStartTime = Date()
         }
         clippyController.setState(.thinking)
-        
-        Task {
-            // 1. Semantic Search for Context
-            var relevantItems: [Item] = []
-            
-            // Perform vector search
-            let searchResults = await clippy.search(query: capturedText, limit: 30)
-            let foundVectorIds = Set(searchResults.map { $0.0 })
-            
-            if !foundVectorIds.isEmpty {
-                // Filter allItems for matching IDs
-                // Note: Efficient enough for typical usage; huge DBs might need optimization
-                let itemsWithIDs = allItems.filter { item in
-                    guard let vid = item.vectorId else { return false }
-                    return foundVectorIds.contains(vid)
-                }
-                
-                // Sort by search score (re-order based on searchResults order)
-                relevantItems = searchResults.compactMap { (id, _) in
-                    itemsWithIDs.first(where: { $0.vectorId == id })
-                }
-            }
-            
-            // 2. Fallback / Supplement with Recent Items
-            // If we have few results, add recent items to ensure we have recent context too
-            if relevantItems.count < 5 {
-                let recentItems = Array(allItems.prefix(5))
-                for item in recentItems {
-                    if !relevantItems.contains(where: { $0.timestamp == item.timestamp }) {
-                        relevantItems.append(item)
-                    }
-                }
-            }
-            
-            // 3. Build Context
-            let clipboardContext: [RAGContextItem] = relevantItems.map { item in
-                RAGContextItem(
-                    content: item.content,
-                    tags: item.tags,
-                    type: item.contentType,
-                    timestamp: item.timestamp,
-                    title: item.title
-                )
-            }
-            print("🧠 [ContentView] RAG Context: Using \(relevantItems.count) items (\(searchResults.count) from search)")
 
-            let answer: String?
-            let imageIndex: Int?
-            
-            switch selectedAIService {
-            case .gemini:
-                // Gemini service might need update or we keep it compatible with old struct if it uses a different one
-                // For now, assuming GeminiService has its own signature or isn't used in Local mode
-                 // Converting back to simple context for Gemini if needed, or update Gemini signature later.
-                 // Since we are in .local mode usually, let's focus on that.
-                 // Actually ContentView uses same logic. Let's assume GeminiService still takes [(String, [String])]
-                 // We might need to simplify for Gemini if it hasn't been updated.
-                 let simpleContext = relevantItems.map { ($0.content, $0.tags) }
-                (answer, imageIndex) = await geminiService.generateAnswerWithImageDetection(
-                    question: capturedText,
-                    clipboardContext: simpleContext,
-                    appName: clipboardMonitor.currentAppName
-                )
-            case .local:
-                // Streaming Implementation for Local AI
-                var fullAnswer = ""
-                do {
-                    let stream = localAIService.generateAnswerStream(
-                        question: capturedText,
-                        clipboardContext: clipboardContext,
-                        appName: clipboardMonitor.currentAppName
-                    )
-                    
-                    for try await token in stream {
-                        fullAnswer += token
-                        // UX: Show streaming text in Clippy bubble!
-                        // Truncate to keep it fitting in the bubble (e.g. last 50 chars)
-                        await MainActor.run {
-                            let preview = fullAnswer.suffix(50).replacingOccurrences(of: "\n", with: " ")
-                            self.clippyController.setState(.writing, message: "...\(preview)")
-                        }
-                    }
-                    answer = fullAnswer
-                } catch {
-                    print("❌ Streaming Error: \(error)")
-                    answer = nil // Fallback to handling nil below
+        Task {
+            let result = await container.queryOrchestrator.processQuery(
+                query: capturedText,
+                allItems: allItems,
+                aiServiceType: container.selectedAIServiceType,
+                appName: clipboardMonitor.currentAppName,
+                onStreamingToken: { fullAnswer in
+                    let preview = fullAnswer.suffix(50).replacingOccurrences(of: "\n", with: " ")
+                    self.clippyController.setState(.writing, message: "...\(preview)")
                 }
-                imageIndex = nil
-            }
-            
+            )
+
             await MainActor.run {
-                // Check for errors and get error message
-                let errorMessage = geminiService.lastErrorMessage
-                handleAIResponse(answer: answer, imageIndex: imageIndex, contextItems: relevantItems, errorMessage: errorMessage)
+                handleAIResponse(
+                    answer: result.answer,
+                    imageIndex: result.imageIndex,
+                    contextItems: result.contextItems,
+                    errorMessage: result.errorMessage
+                )
             }
         }
     }
@@ -441,11 +315,10 @@ struct ContentView: View {
         let elapsed = Date().timeIntervalSince(thinkingStartTime ?? Date())
         let remainingDelay = max(0, 3.0 - elapsed) // Minimum 3 seconds of thinking
         
-        print("🎯 [ContentView] AI response received. Elapsed: \(elapsed)s, Remaining delay: \(remainingDelay)s")
+        Logger.ui.info("AI response received. Elapsed: \(elapsed, privacy: .public)s, Remaining delay: \(remainingDelay, privacy: .public)s")
         
         // Delay transition to done state if needed to ensure minimum 3s thinking
         DispatchQueue.main.asyncAfter(deadline: .now() + remainingDelay) {
-            self.isProcessingAnswer = false
             self.thinkingStartTime = nil // Reset thinking timer
             
             // Check if there was an error
@@ -512,7 +385,7 @@ struct ContentView: View {
     }
     
     private func toggleVoiceRecording() {
-        print("\n🎙️ [ContentView] Voice capture hotkey triggered (Option+Space)")
+        Logger.ui.info("Voice capture hotkey triggered (Option+Space)")
         
         if activeInputMode == .voiceCapture {
             // Second press: Stop Recording & Process
@@ -547,7 +420,7 @@ struct ContentView: View {
                         }
                     } catch {
                         await MainActor.run {
-                            print("Voice Error: \(error.localizedDescription)")
+                            Logger.ui.error("Voice error: \(error.localizedDescription, privacy: .public)")
                             self.clippyController.setState(.error, message: "Couldn't hear you 🙉")
                             self.activeInputMode = .none
                         }
@@ -592,122 +465,32 @@ struct ContentView: View {
     // MARK: - API Key Helpers
     
     private func saveAPIKey(_ key: String) {
-        UserDefaults.standard.set(key, forKey: "Gemini_API_Key")
+        KeychainHelper.save(key: "Gemini_API_Key", value: key)
         geminiService.updateApiKey(key)
-        
-        // No need to restart monitoring as dependencies are injected by reference
-        // and GeminiService handles its own key state.
     }
-    
+
     private func getStoredAPIKey() -> String {
         // 1. Check process environment
         if let envKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"], !envKey.isEmpty { return envKey }
-        
-        // 2. Check UserDefaults
-        if let stored = UserDefaults.standard.string(forKey: "Gemini_API_Key"), !stored.isEmpty {
+
+        // 2. Check Keychain
+        if let stored = KeychainHelper.load(key: "Gemini_API_Key"), !stored.isEmpty {
             return stored
         }
-        
-        // 3. Check local .env file manually (Fallback for development)
-        let envPath = URL(fileURLWithPath: #file).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(".env")
-        if let content = try? String(contentsOf: envPath, encoding: .utf8) {
-            let lines = content.components(separatedBy: .newlines)
-            for line in lines {
-                if line.starts(with: "GEMINI_API_KEY=") {
-                    return line.replacingOccurrences(of: "GEMINI_API_KEY=", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-            }
-        }
-        
+
         return ""
     }
-    
+
     private func getStoredElevenLabsKey() -> String {
         // 1. Check process environment
         if let envKey = ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"], !envKey.isEmpty { return envKey }
-        
-        // 2. Check UserDefaults
-        if let stored = UserDefaults.standard.string(forKey: "ElevenLabs_API_Key"), !stored.isEmpty {
+
+        // 2. Check Keychain
+        if let stored = KeychainHelper.load(key: "ElevenLabs_API_Key"), !stored.isEmpty {
             return stored
         }
-        
-        // 3. Check local .env file manually (Fallback for development)
-        let envPath = URL(fileURLWithPath: #file).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(".env")
-        if let content = try? String(contentsOf: envPath, encoding: .utf8) {
-            let lines = content.components(separatedBy: .newlines)
-            for line in lines {
-                if line.starts(with: "ELEVENLABS_API_KEY=") {
-                    return line.replacingOccurrences(of: "ELEVENLABS_API_KEY=", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-            }
-        }
-        
+
         return ""
-    }
-}
-
-// MARK: - Settings View
-
-struct SettingsView: View {
-    @Environment(\.dismiss) var dismiss
-    @Binding var apiKey: String
-    @Binding var elevenLabsKey: String
-    @Binding var selectedService: AIServiceType
-    
-    @State private var tempGeminiKey: String = ""
-    @State private var tempElevenLabsKey: String = ""
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Settings")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            Divider()
-            
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Gemini API Key")
-                            .font(.headline)
-                        
-                        SecureField("Enter Gemini API key...", text: $tempGeminiKey)
-                            .textFieldStyle(.roundedBorder)
-                            .onAppear { tempGeminiKey = apiKey }
-                        
-                        Text("Required for Gemini services. Keys are stored locally.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("ElevenLabs API Key")
-                            .font(.headline)
-                        
-                        SecureField("Enter ElevenLabs API key...", text: $tempElevenLabsKey)
-                            .textFieldStyle(.roundedBorder)
-                            .onAppear { tempElevenLabsKey = elevenLabsKey }
-                        
-                        Text("Required for voice input (Option+Space). Keys are stored locally.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            
-            HStack {
-                Button("Cancel") { dismiss() }
-                Spacer()
-                Button("Save") {
-                    apiKey = tempGeminiKey
-                    elevenLabsKey = tempElevenLabsKey
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(24)
-        .frame(width: 450, height: 350)
     }
 }
 

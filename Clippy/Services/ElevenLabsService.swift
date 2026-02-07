@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import os
 
 class ElevenLabsService: ObservableObject {
     private let apiKey: String
@@ -10,13 +11,11 @@ class ElevenLabsService: ObservableObject {
     }
     
     func transcribe(audioFileURL: URL) async throws -> String {
-        print("📤 [ElevenLabs] Sending audio for transcription...")
-        print("📂 [ElevenLabs] Audio file path: \(audioFileURL.path)")
-        print("🔑 [ElevenLabs] API Key (first 10 chars): \(String(apiKey.prefix(10)))...")
+        Logger.network.info("Sending audio for transcription")
         
         // Check file exists and has content
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: audioFileURL.path)[.size] as? Int) ?? 0
-        print("📊 [ElevenLabs] Audio file size: \(fileSize) bytes")
+        Logger.network.info("Audio file size: \(fileSize, privacy: .public) bytes")
         
         guard fileSize > 0 else {
             throw NSError(domain: "ElevenLabs", code: -1, userInfo: [NSLocalizedDescriptionKey: "Audio file is empty"])
@@ -30,7 +29,7 @@ class ElevenLabsService: ObservableObject {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         
         let data = try createMultipartBody(fileURL: audioFileURL, boundary: boundary)
-        print("📦 [ElevenLabs] Request body size: \(data.count) bytes")
+        Logger.network.info("Request body size: \(data.count, privacy: .public) bytes")
         
         let (responseData, response) = try await URLSession.shared.upload(for: request, from: data)
         
@@ -38,25 +37,22 @@ class ElevenLabsService: ObservableObject {
             throw NSError(domain: "ElevenLabs", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
         }
         
-        print("📡 [ElevenLabs] Response status: \(httpResponse.statusCode)")
+        Logger.network.info("Response status: \(httpResponse.statusCode, privacy: .public)")
         
         if httpResponse.statusCode != 200 {
             let errorMsg = String(data: responseData, encoding: .utf8) ?? "Unknown error"
-            print("❌ [ElevenLabs] API Error (\(httpResponse.statusCode)): \(errorMsg)")
+            Logger.network.error("API error (\(httpResponse.statusCode, privacy: .public)): \(errorMsg, privacy: .private)")
             throw NSError(domain: "ElevenLabs", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "API Error: \(errorMsg)"])
         }
         
-        let responseString = String(data: responseData, encoding: .utf8) ?? "Unable to decode"
-        print("📥 [ElevenLabs] Raw response: \(responseString)")
-        
-        // Parse response: {"text": "what is my gemini api key"}
+        // Parse response
         if let json = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
            let text = json["text"] as? String {
-            print("✅ [ElevenLabs] Transcription: \(text)")
+            Logger.network.info("Transcription complete")
             return text
         }
         
-        print("⚠️ [ElevenLabs] Could not parse JSON response")
+        Logger.network.warning("Could not parse JSON response")
         return ""
     }
     

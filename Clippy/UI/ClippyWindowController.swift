@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import ApplicationServices
 import ImageIO
+import os
 
 class ClippyWindowController: ObservableObject {
     private var window: NSWindow?
@@ -38,11 +39,11 @@ class ClippyWindowController: ObservableObject {
             let displayMessage = message ?? state.defaultMessage
             let gifName = state.gifFileName
             
-            print("📎 [ClippyWindowController] Setting state to \(state) with GIF: \(gifName)")
+            Logger.ui.debug("Setting state to \(String(describing: state), privacy: .public) with GIF: \(gifName, privacy: .public)")
             
             // Create window if needed
             if self.window == nil {
-                print("📎 [ClippyWindowController] Creating new window")
+                Logger.ui.debug("Creating new window")
                 self.createWindow()
             }
             
@@ -85,7 +86,7 @@ class ClippyWindowController: ObservableObject {
                 if let savedPos = self.savedPosition {
                     // Use the user's saved position
                     self.window?.setFrameOrigin(savedPos)
-                    print("📎 [ClippyWindowController] Restored saved position: \(savedPos)")
+                    Logger.ui.debug("Restored saved position: \(savedPos.debugDescription, privacy: .public)")
                 } else if self.followTextInput {
                     self.positionNearActiveTextInput()
                 } else {
@@ -99,7 +100,7 @@ class ClippyWindowController: ObservableObject {
             self.window?.orderFrontRegardless()
             self.isVisible = true
             
-            print("📎 [ClippyWindowController] Window positioned and visible")
+            Logger.ui.debug("Window positioned and visible")
             
             // Start monitoring for ESC key when window is shown
             self.startEscapeKeyMonitoring()
@@ -175,7 +176,7 @@ class ClippyWindowController: ObservableObject {
             object: window
         )
         
-        print("📎 [ClippyWindowController] Window created and ready")
+        Logger.ui.debug("Window created and ready")
     }
     
     /// Called when the user drags the window
@@ -183,7 +184,7 @@ class ClippyWindowController: ObservableObject {
         guard let window = window else { return }
         savedPosition = window.frame.origin
         hasUserDraggedWindow = true
-        print("📎 [ClippyWindowController] User moved window to: \(window.frame.origin)")
+        Logger.ui.debug("User moved window to: \(window.frame.origin.debugDescription, privacy: .public)")
     }
     
     /// Reset to auto-positioning (clears saved position)
@@ -194,7 +195,7 @@ class ClippyWindowController: ObservableObject {
         if let window = window {
             positionWindowCentered(window)
         }
-        print("📎 [ClippyWindowController] Position reset to default")
+        Logger.ui.debug("Position reset to default")
     }
     
     // MARK: - Public Methods
@@ -202,7 +203,7 @@ class ClippyWindowController: ObservableObject {
     /// Toggle whether the clippy follows the active text input
     func setFollowTextInput(_ enabled: Bool) {
         followTextInput = enabled
-        print("🐕 [ClippyWindowController] Text input following: \(enabled ? "enabled" : "disabled")")
+        Logger.ui.info("Text input following: \(enabled ? "enabled" : "disabled", privacy: .public)")
     }
     
     /// Manually reposition the clippy near the current text input (if following is enabled)
@@ -216,24 +217,18 @@ class ClippyWindowController: ObservableObject {
     /// Position the clippy window near the currently active text input element
     private func positionNearActiveTextInput() {
         guard let window = window else { return }
-        
-        if let textInputFrame = getActiveTextInputFrame() {
-            positionWindow(window, nearTextInput: textInputFrame)
-        } else {
-            // Fallback to default positioning if no text input is found
-            positionWindowDefault(window)
-        }
+        positionWindowCentered(window)
     }
     
     /// Get the frame (position and size) of the currently focused text input element
     private func getActiveTextInputFrame() -> NSRect? {
         guard AXIsProcessTrusted() else {
-            print("⚠️ [ClippyWindowController] Accessibility permission not granted")
+            Logger.ui.warning("Accessibility permission not granted")
             return nil
         }
         
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            print("⚠️ [ClippyWindowController] No frontmost application")
+            Logger.ui.warning("No frontmost application")
             return nil
         }
         
@@ -242,33 +237,36 @@ class ClippyWindowController: ObservableObject {
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElementRef)
         
         guard result == AXError.success, let focusedElement = focusedElementRef else {
-            print("⚠️ [ClippyWindowController] Unable to locate focused UI element")
+            Logger.ui.warning("Unable to locate focused UI element")
             return nil
         }
         
-        let focusedUIElement = focusedElement as! AXUIElement
-        
+        guard let focusedUIElement = focusedElement as? AXUIElement else {
+            Logger.ui.warning("Focused element is not an AXUIElement")
+            return nil
+        }
+
         // Check if the focused element is a text input (text field, text area, etc.)
         if !isTextInputElement(focusedUIElement) {
-            print("ℹ️ [ClippyWindowController] Focused element is not a text input")
+            Logger.ui.debug("Focused element is not a text input")
             return nil
         }
         
         // Try to get the exact caret position first
         if let caretFrame = getCaretPosition(focusedUIElement) {
-            print("✅ [ClippyWindowController] Found caret at: \(caretFrame)")
+            Logger.ui.debug("Found caret at: \(caretFrame.debugDescription, privacy: .public)")
             return caretFrame
         }
         
         // Fallback to text field bounds if caret position is not available
         guard let position = getElementPosition(focusedUIElement),
               let size = getElementSize(focusedUIElement) else {
-            print("⚠️ [ClippyWindowController] Unable to get text input position/size")
+            Logger.ui.warning("Unable to get text input position/size")
             return nil
         }
         
         let frame = NSRect(x: position.x, y: position.y, width: size.width, height: size.height)
-        print("✅ [ClippyWindowController] Found text input at: \(frame) (fallback to field bounds)")
+        Logger.ui.debug("Found text input at: \(frame.debugDescription, privacy: .public) (fallback to field bounds)")
         return frame
     }
     
@@ -296,12 +294,13 @@ class ClippyWindowController: ObservableObject {
         var positionRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionRef)
         
-        guard result == AXError.success, let positionValue = positionRef else {
+        guard result == AXError.success,
+              let positionValue = positionRef as? AXValue else {
             return nil
         }
-        
+
         var point = NSPoint()
-        let success = AXValueGetValue(positionValue as! AXValue, .cgPoint, &point)
+        let success = AXValueGetValue(positionValue, .cgPoint, &point)
         return success ? point : nil
     }
     
@@ -310,12 +309,13 @@ class ClippyWindowController: ObservableObject {
         var sizeRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef)
         
-        guard result == AXError.success, let sizeValue = sizeRef else {
+        guard result == AXError.success,
+              let sizeValue = sizeRef as? AXValue else {
             return nil
         }
-        
+
         var size = NSSize()
-        let success = AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+        let success = AXValueGetValue(sizeValue, .cgSize, &size)
         return success ? size : nil
     }
     
@@ -326,7 +326,7 @@ class ClippyWindowController: ObservableObject {
         let rangeResult = AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &selectedRangeRef)
         
         guard rangeResult == AXError.success, let selectedRangeValue = selectedRangeRef else {
-            print("⚠️ [ClippyWindowController] Unable to get selected text range")
+            Logger.ui.warning("Unable to get selected text range")
             return nil
         }
         
@@ -339,31 +339,22 @@ class ClippyWindowController: ObservableObject {
             &caretBoundsRef
         )
         
-        guard boundsResult == AXError.success, let caretBoundsValue = caretBoundsRef else {
-            print("⚠️ [ClippyWindowController] Unable to get caret bounds")
+        guard boundsResult == AXError.success,
+              let caretBoundsValue = caretBoundsRef as? AXValue else {
+            Logger.ui.warning("Unable to get caret bounds")
             return nil
         }
-        
+
         var caretBounds = CGRect()
-        let success = AXValueGetValue(caretBoundsValue as! AXValue, .cgRect, &caretBounds)
+        let success = AXValueGetValue(caretBoundsValue, .cgRect, &caretBounds)
         
         if success {
             // Convert CGRect to NSRect and return
             return NSRect(x: caretBounds.origin.x, y: caretBounds.origin.y, width: max(caretBounds.width, 2), height: caretBounds.height)
         } else {
-            print("⚠️ [ClippyWindowController] Failed to extract caret bounds from AXValue")
+            Logger.ui.warning("Failed to extract caret bounds from AXValue")
             return nil
         }
-    }
-    
-    /// Position the clippy window in a fixed location - horizontally centered, just below screen center
-    private func positionWindow(_ window: NSWindow, nearTextInput textInputFrame: NSRect) {
-        positionWindowCentered(window)
-    }
-    
-    /// Fallback positioning when no text input is found
-    private func positionWindowDefault(_ window: NSWindow) {
-        positionWindowCentered(window)
     }
     
     /// Position the clippy window in the top-right area of the screen, away from the notch
@@ -381,7 +372,7 @@ class ClippyWindowController: ObservableObject {
         let newOrigin = NSPoint(x: x, y: y)
         window.setFrameOrigin(newOrigin)
         
-        print("🐕 [ClippyWindowController] Positioned clippy in top-right at: \(newOrigin)")
+        Logger.ui.debug("Positioned clippy in top-right at: \(newOrigin.debugDescription, privacy: .public)")
     }
     
     // MARK: - ESC Key Monitoring
@@ -394,12 +385,12 @@ class ClippyWindowController: ObservableObject {
         escapeKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             // Check if ESC key was pressed (keyCode 53)
             if event.keyCode == 53 {
-                print("🐕 [ClippyWindowController] ESC key pressed - hiding clippy")
+                Logger.ui.debug("ESC key pressed - hiding clippy")
                 self?.hide()
             }
         }
         
-        print("🐕 [ClippyWindowController] Started ESC key monitoring")
+        Logger.ui.debug("Started ESC key monitoring")
     }
     
     /// Stop monitoring for ESC key presses
@@ -407,7 +398,7 @@ class ClippyWindowController: ObservableObject {
         if let monitor = escapeKeyMonitor {
             NSEvent.removeMonitor(monitor)
             escapeKeyMonitor = nil
-            print("🐕 [ClippyWindowController] Stopped ESC key monitoring")
+            Logger.ui.debug("Stopped ESC key monitoring")
         }
 
         // Reset animation when dismissing the clippy so it restarts next time it's shown

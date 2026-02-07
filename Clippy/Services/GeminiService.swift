@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // Gemini API Response
 struct GeminiAPIResponse: Codable {
@@ -53,9 +54,7 @@ class GeminiService: ObservableObject, AIServiceProtocol {
         clipboardContext: [(content: String, tags: [String])],
         appName: String?
     ) async -> (answer: String?, imageIndex: Int?) {
-        print("🤖 [GeminiService] Generating answer with image detection...")
-        print("   Question: \(question)")
-        print("   Clipboard items: \(clipboardContext.count)")
+        Logger.ai.info("Generating answer with image detection (\(clipboardContext.count, privacy: .public) context items)")
         
         isProcessing = true
         defer { isProcessing = false }
@@ -65,14 +64,14 @@ class GeminiService: ObservableObject, AIServiceProtocol {
         
         // Make API call
         guard let (answer, imageIndex) = await callGeminiForAnswerWithImage(prompt: prompt) else {
-            print("   ❌ Failed to generate answer")
+            Logger.ai.error("Failed to generate answer")
             return (nil, nil)
         }
         
         if let imageIndex = imageIndex, imageIndex > 0 {
-            print("   ✅ Detected image paste request: item \(imageIndex)")
+            Logger.ai.info("Detected image paste request: item \(imageIndex, privacy: .public)")
         } else {
-            print("   ✅ Generated answer: \(answer?.prefix(100) ?? "empty")...")
+            Logger.ai.info("Generated text answer")
         }
         return (answer, imageIndex)
     }
@@ -109,9 +108,7 @@ class GeminiService: ObservableObject, AIServiceProtocol {
         appName: String?,
         context: String?
     ) async -> [String] {
-        print("🏷️  [GeminiService] Generating tags...")
-        print("   Content: \(content.prefix(100))...")
-        print("   App: \(appName ?? "Unknown")")
+        Logger.ai.info("Generating tags...")
         
         isProcessing = true
         defer { isProcessing = false }
@@ -121,11 +118,11 @@ class GeminiService: ObservableObject, AIServiceProtocol {
         
         // Make API call
         guard let tags = await callGemini(prompt: prompt) else {
-            print("   ❌ Failed to generate tags")
+            Logger.ai.error("Failed to generate tags")
             return []
         }
         
-        print("   ✅ Generated tags: \(tags)")
+        Logger.ai.info("Generated tags: \(tags, privacy: .private)")
         return tags
     }
     
@@ -210,20 +207,20 @@ class GeminiService: ObservableObject, AIServiceProtocol {
     
     private func callGeminiForAnswerWithImage(prompt: String) async -> (String?, Int?)? {
         guard !apiKey.isEmpty else {
-            print("   ⚠️  No valid API key configured")
+            Logger.network.warning("No valid API key configured")
             lastErrorMessage = "API key not configured. Go to Settings to add your Gemini API key."
             return nil
         }
+
+        Logger.network.info("Sending prompt to Gemini for answer")
         
-        print("   📤 Sending prompt to Gemini for answer...")
-        
-        // Construct request URL
-        guard let url = URL(string: "\(baseURL)/\(modelName):generateContent?key=\(apiKey)") else {
+        // Construct request URL (API key sent via header, not query param)
+        guard let url = URL(string: "\(baseURL)/\(modelName):generateContent") else {
             lastError = "Invalid URL"
             lastErrorMessage = "Configuration error"
             return nil
         }
-        
+
         // Gemini API Request Body
         let requestBody: [String: Any] = [
             "contents": [
@@ -238,10 +235,11 @@ class GeminiService: ObservableObject, AIServiceProtocol {
                 "maxOutputTokens": 8192
             ]
         ]
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
@@ -254,7 +252,7 @@ class GeminiService: ObservableObject, AIServiceProtocol {
                 return nil
             }
             
-            print("   📡 Gemini Response Status: \(httpResponse.statusCode)")
+            Logger.network.info("Gemini response status: \(httpResponse.statusCode, privacy: .public)")
             
             guard httpResponse.statusCode == 200 else {
                 let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
@@ -274,10 +272,10 @@ class GeminiService: ObservableObject, AIServiceProtocol {
                     lastErrorMessage = "API error (\(httpResponse.statusCode))"
                 }
                 
-                print("   ❌ API Error: \(errorMessage)")
+                Logger.network.error("API error: \(errorMessage, privacy: .private)")
                 return nil
             }
-            
+
             // Clear any previous errors on success
             lastErrorMessage = nil
             
@@ -289,21 +287,9 @@ class GeminiService: ObservableObject, AIServiceProtocol {
                 lastError = "No content in response"
                 return nil
             }
-            
-            print("   📝 Extracted JSON: \(text)")
-            
-            // Clean up markdown code blocks if present
-            var cleanText = text
-            if cleanText.contains("```json") {
-                cleanText = cleanText.replacingOccurrences(of: "```json", with: "")
-                cleanText = cleanText.replacingOccurrences(of: "```", with: "")
-            } else if cleanText.contains("```") {
-                cleanText = cleanText.replacingOccurrences(of: "```", with: "")
-            }
-            cleanText = cleanText.trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            print("   🧹 Cleaned JSON: \(cleanText)")
-            
+
+            let cleanText = cleanMarkdownJSON(text)
+
             // Parse the JSON to extract both answer and paste_image
             if let jsonData = cleanText.data(using: .utf8),
                let jsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
@@ -311,10 +297,9 @@ class GeminiService: ObservableObject, AIServiceProtocol {
                 let pasteImage = jsonObject["paste_image"] as? Int
                 
                 if let pasteImage = pasteImage, pasteImage > 0 {
-                    print("   ✅ Image paste detected: item \(pasteImage)")
+                    Logger.ai.info("Image paste detected: item \(pasteImage, privacy: .public)")
                     return (answer, pasteImage)
                 } else {
-                    print("   ✅ Text answer: \(answer?.prefix(100) ?? "empty")...")
                     return (answer, nil)
                 }
             }
@@ -335,29 +320,29 @@ class GeminiService: ObservableObject, AIServiceProtocol {
             default:
                 lastErrorMessage = "Network error. Check connection."
             }
-            print("   ❌ Network Error: \(error)")
+            Logger.network.error("Network error: \(error.localizedDescription, privacy: .public)")
             return nil
         } catch {
             lastError = error.localizedDescription
             lastErrorMessage = "Something went wrong. Try again."
-            print("   ❌ Error: \(error)")
+            Logger.network.error("Error: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
-    
+
     private func callGemini(prompt: String) async -> [String]? {
         guard !apiKey.isEmpty else {
-            print("   ⚠️  No valid API key configured")
+            Logger.network.warning("No valid API key configured")
             return nil
         }
+
+        Logger.network.info("Sending prompt to Gemini for tagging")
         
-        print("   📤 Sending prompt to Gemini for tagging...")
-        
-        guard let url = URL(string: "\(baseURL)/\(modelName):generateContent?key=\(apiKey)") else {
+        guard let url = URL(string: "\(baseURL)/\(modelName):generateContent") else {
             lastError = "Invalid URL"
             return nil
         }
-        
+
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -371,57 +356,47 @@ class GeminiService: ObservableObject, AIServiceProtocol {
                 "maxOutputTokens": 8192
             ]
         ]
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-            
+
             let (data, response) = try await URLSession.shared.data(for: request)
-            
+
             guard let httpResponse = response as? HTTPURLResponse else {
                 lastError = "Invalid response"
                 return nil
             }
-            
-            print("   📡 Gemini Response Status: \(httpResponse.statusCode)")
-            
+
+            Logger.network.info("Tagging response status: \(httpResponse.statusCode, privacy: .public)")
+
             guard httpResponse.statusCode == 200 else {
-                let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-                lastError = "API Error (\(httpResponse.statusCode)): \(errorMessage)"
-                print("   ❌ API Error: \(errorMessage)")
+                lastError = "API Error (\(httpResponse.statusCode))"
+                Logger.network.error("Tagging API error: \(httpResponse.statusCode, privacy: .public)")
                 return nil
             }
-            
+
             // Parse response
             let decoder = JSONDecoder()
             let apiResponse = try decoder.decode(GeminiAPIResponse.self, from: data)
-            
+
             guard let text = apiResponse.candidates?.first?.content?.parts?.first?.text else {
                 lastError = "No content in response"
                 return nil
             }
             
-            print("   📝 Extracted text: \(text)")
-            
-            // Clean up markdown code blocks if present
-            var cleanText = text
-            if cleanText.contains("```json") {
-                cleanText = cleanText.replacingOccurrences(of: "```json", with: "")
-                cleanText = cleanText.replacingOccurrences(of: "```", with: "")
-            } else if cleanText.contains("```") {
-                cleanText = cleanText.replacingOccurrences(of: "```", with: "")
-            }
-            cleanText = cleanText.trimmingCharacters(in: .whitespacesAndNewlines)
-            
+            let cleanText = cleanMarkdownJSON(text)
+
             // Try parsing as JSON first
             if let jsonData = cleanText.data(using: .utf8),
                let jsonObject = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                let tagsArray = jsonObject["tags"] as? [String] {
                 let tags = tagsArray.map { $0.lowercased() }.filter { !$0.isEmpty }
-                print("   ✅ Parsed JSON tags: \(tags)")
+                Logger.ai.info("Parsed JSON tags: \(tags, privacy: .private)")
                 return tags
             }
             
@@ -429,27 +404,26 @@ class GeminiService: ObservableObject, AIServiceProtocol {
             
         } catch {
             lastError = error.localizedDescription
-            print("   ❌ Error: \(error)")
+            Logger.network.error("Error: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
-    
+
     /// Analyze image and return a summary description
     func analyzeImage(imageData: Data) async -> String? {
         guard !apiKey.isEmpty else {
-            print("   ⚠️  No valid API key configured")
+            Logger.network.warning("No valid API key configured")
             return nil
         }
-        
-        print("🖼️ [GeminiService] Analyzing image...")
-        print("   Image size: \(imageData.count) bytes")
-        
+
+        Logger.ai.info("Analyzing image (\(imageData.count, privacy: .public) bytes)")
+
         let base64Image = imageData.base64EncodedString()
-        
-        guard let url = URL(string: "\(baseURL)/\(modelName):generateContent?key=\(apiKey)") else {
+
+        guard let url = URL(string: "\(baseURL)/\(modelName):generateContent") else {
             return nil
         }
-        
+
         let requestBody: [String: Any] = [
             "contents": [
                 [
@@ -468,10 +442,11 @@ class GeminiService: ObservableObject, AIServiceProtocol {
                 "maxOutputTokens": 8192
             ]
         ]
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
@@ -481,30 +456,42 @@ class GeminiService: ObservableObject, AIServiceProtocol {
                 return nil
             }
             
-            print("   📡 Gemini Vision Response Status: \(httpResponse.statusCode)")
+            Logger.network.info("Gemini Vision response status: \(httpResponse.statusCode, privacy: .public)")
             
             guard httpResponse.statusCode == 200 else {
                 let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-                print("   ❌ API Error: \(errorMessage)")
+                Logger.network.error("API error: \(errorMessage, privacy: .private)")
                 return nil
             }
-            
+
             // Parse response
             let decoder = JSONDecoder()
             let apiResponse = try decoder.decode(GeminiAPIResponse.self, from: data)
-            
+
             if let text = apiResponse.candidates?.first?.content?.parts?.first?.text {
-                print("   ✅ Image analysis: \(text.prefix(100))...")
+                Logger.ai.info("Image analysis complete")
                 return text
             }
             
             return nil
         } catch {
-            print("   ❌ Error: \(error)")
+            Logger.network.error("Error: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
-    
+
+    /// Strip markdown code fences from Gemini's JSON responses.
+    private func cleanMarkdownJSON(_ text: String) -> String {
+        var cleaned = text
+        if cleaned.contains("```json") {
+            cleaned = cleaned.replacingOccurrences(of: "```json", with: "")
+            cleaned = cleaned.replacingOccurrences(of: "```", with: "")
+        } else if cleaned.contains("```") {
+            cleaned = cleaned.replacingOccurrences(of: "```", with: "")
+        }
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Convenience method to get API key from environment
     static func fromEnvironment() -> GeminiService? {
         if let apiKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] {

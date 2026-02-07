@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import os
 
 @MainActor
 class TextCaptureService: ObservableObject {
@@ -41,8 +42,8 @@ class TextCaptureService: ObservableObject {
         // Capture the source app immediately
         DispatchQueue.main.async {
             self.sourceApp = NSWorkspace.shared.frontmostApplication
-            print("🎯 [TextCaptureService] Starting text capture...")
-            print("   Source app: \(self.sourceApp?.localizedName ?? "Unknown")")
+            Logger.services.info("Starting text capture")
+            Logger.services.info("Source app: \(self.sourceApp?.localizedName ?? "Unknown", privacy: .public)")
         }
         
         let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
@@ -61,7 +62,7 @@ class TextCaptureService: ObservableObject {
                 if event.type == .keyDown && 
                    event.flags.contains(.maskAlternate) && 
                    event.getIntegerValueField(.keyboardEventKeycode) == 7 { // 7 = X
-                    print("🎯 [TextCaptureService] Option+X detected - stopping capture")
+                    Logger.services.info("Option+X detected - stopping capture")
                     DispatchQueue.main.async {
                         service.stopCapturing()
                     }
@@ -77,7 +78,7 @@ class TextCaptureService: ObservableObject {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            print("❌ [TextCaptureService] Failed to create event tap")
+            Logger.services.error("Failed to create event tap")
             return
         }
         
@@ -86,15 +87,13 @@ class TextCaptureService: ObservableObject {
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: eventTap, enable: true)
         
-        print("✅ [TextCaptureService] Text capture started")
+        Logger.services.info("Text capture started")
     }
     
     func stopCapturing() {
         guard isCapturing else { return }
         
-        print("🛑 [TextCaptureService] Stopping text capture")
-        print("   Captured text: '\(capturedText)'")
-        print("   Capture duration: \(captureStartTime?.timeIntervalSinceNow ?? 0)s")
+        Logger.services.info("Stopping text capture (duration: \(captureStartTime?.timeIntervalSinceNow ?? 0, privacy: .public)s)")
         
         if let eventTap = eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
@@ -108,7 +107,7 @@ class TextCaptureService: ObservableObject {
         
         // Store the length BEFORE clearing capturedText
         capturedTextLength = capturedText.count
-        print("   Stored captured text length: \(capturedTextLength) characters")
+        Logger.services.info("Stored captured text length: \(capturedTextLength, privacy: .public) characters")
         
         // Call completion handler with captured text
         if !capturedText.isEmpty {
@@ -161,7 +160,7 @@ class TextCaptureService: ObservableObject {
         // Detect first keystroke (typing started)
         if !hasTypedText {
             hasTypedText = true
-            print("⌨️ [TextCaptureService] User started typing - triggering callback")
+            Logger.services.info("User started typing - triggering callback")
             DispatchQueue.main.async {
                 self.onTypingDetected?()
             }
@@ -182,7 +181,7 @@ class TextCaptureService: ObservableObject {
     
     /// Insert text using "Atomic Paste" (Clipboard Swap + Cmd+V) - The Industry Standard
     private func pasteTextAtomic(_ text: String) {
-        print("🔄 [TextCaptureService] Performing Atomic Paste...")
+        Logger.services.info("Performing Atomic Paste")
         
         let pasteboard = NSPasteboard.general
         
@@ -203,14 +202,14 @@ class TextCaptureService: ObservableObject {
         
         // 4. Restore Clipboard (after delay)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            print("🔄 [TextCaptureService] Restoring clipboard...")
+            Logger.services.info("Restoring clipboard")
             if let oldText = previousString {
                 // Only restore if user hasn't copied something else in the meantime
                 if pasteboard.changeCount == previousChangeCount + 1 {
                     pasteboard.clearContents()
                     pasteboard.setString(oldText, forType: .string)
                 } else {
-                     print("⚠️ [TextCaptureService] Clipboard changed externally during paste, skipping restore")
+                     Logger.services.warning("Clipboard changed externally during paste, skipping restore")
                 }
             } else {
                  // Nothing to restore (was empty or non-string). Clear?
@@ -247,11 +246,11 @@ class TextCaptureService: ObservableObject {
     /// Replace the captured text with the AI answer in the original text field
     func replaceCapturedTextWithAnswer(_ answer: String) {
         guard let currentSourceApp = sourceApp else {
-            print("❌ [TextCaptureService] No source app available for replacement")
+            Logger.services.error("No source app available for replacement")
             return
         }
         
-        print("🔄 [TextCaptureService] Replacing captured text with answer...")
+        Logger.services.info("Replacing captured text with answer")
         
         // Use Fluid Dictation's approach for deletion
         let src = CGEventSource(stateID: .hidSystemState)
@@ -261,27 +260,27 @@ class TextCaptureService: ObservableObject {
         
         // Step 2: Wait for deletion to complete then Paste
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            print("🔄 [TextCaptureService] Deletion complete, pasting answer...")
+            Logger.services.info("Deletion complete, pasting answer")
             self.pasteTextAtomic(answer)
             
             // Clean up
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 self.sourceApp = nil
                 self.capturedTextLength = 0
-                print("✅ [TextCaptureService] Text replacement complete")
+                Logger.services.info("Text replacement complete")
             }
         }
     }
     
     /// Insert text into the current cursor position (for voice input or direct insertion)
     func insertTextAtCursor(_ answer: String) {
-        print("🔄 [TextCaptureService] Inserting text at cursor position atomic...")
+        Logger.services.info("Inserting text at cursor position atomic")
         pasteTextAtomic(answer)
     }
 
     /// Delete a specific number of characters using backspace events
     private func deleteCharacters(count: Int, using source: CGEventSource?) {
-        print("🔄 [TextCaptureService] Deleting \(count) characters using backspace")
+        Logger.services.info("Deleting \(count, privacy: .public) characters using backspace")
         guard count > 0 else { return }
         
         releaseModifierKeys(using: source)

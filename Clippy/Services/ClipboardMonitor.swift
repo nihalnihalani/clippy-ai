@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import SwiftData
+import os
 
 /// ClipboardMonitor: Thin orchestrator for clipboard events.
 /// Delegates context to ContextEngine, ingestion to Repository.
@@ -8,7 +9,10 @@ import SwiftData
 class ClipboardMonitor: ObservableObject {
     @Published var clipboardContent: String = ""
     @Published var isMonitoring: Bool = false
-    
+
+    /// Set to true before programmatically writing to the clipboard to prevent re-ingesting our own copy.
+    var skipNextClipboardChange: Bool = false
+
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     private var repository: ClipboardRepository?
@@ -53,10 +57,10 @@ class ClipboardMonitor: ObservableObject {
         isMonitoring = true
         
         // Start monitoring timer
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self.contextEngine?.updateContext()
-                self.checkClipboard()
+                self?.contextEngine?.updateContext()
+                self?.checkClipboard()
             }
         }
     }
@@ -84,10 +88,16 @@ class ClipboardMonitor: ObservableObject {
     private func checkClipboard() {
         let pasteboard = NSPasteboard.general
         let currentChangeCount = pasteboard.changeCount
-        
+
         if currentChangeCount != lastChangeCount {
             lastChangeCount = currentChangeCount
-            
+
+            // Skip this change if it was triggered by the app itself (e.g. status bar copy)
+            if skipNextClipboardChange {
+                skipNextClipboardChange = false
+                return
+            }
+
             // Check for images first
             if let imageData = pasteboard.data(forType: .tiff) ?? pasteboard.data(forType: .png) {
                 clipboardContent = "[Image]"
@@ -105,31 +115,24 @@ class ClipboardMonitor: ObservableObject {
     
     // MARK: - Image Handling
     
-    private func getImagesDirectory() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let imagesDir = appSupport.appendingPathComponent("Clippy/Images")
-        try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
-        return imagesDir
-    }
-    
     private func saveImageItem(imageData: Data) {
         guard let repository = repository else { return }
         
-        print("💾 [ClipboardMonitor] Saving new image item...")
+        Logger.clipboard.info("Saving new image item")
         
         guard let nsImage = NSImage(data: imageData),
               let pngData = nsImage.pngData() else {
-            print("   ❌ Failed to convert image to PNG format")
+            Logger.clipboard.error("Failed to convert image to PNG format")
             return
         }
         
         let filename = "\(UUID().uuidString).png"
-        let imageURL = getImagesDirectory().appendingPathComponent(filename)
+        let imageURL = ClipboardService.shared.getImagesDirectory().appendingPathComponent(filename)
         
         do {
             try pngData.write(to: imageURL)
         } catch {
-            print("   ❌ Failed to save image to disk: \(error)")
+            Logger.clipboard.error("Failed to save image to disk: \(error.localizedDescription, privacy: .public)")
             return
         }
         
@@ -146,10 +149,10 @@ class ClipboardMonitor: ObservableObject {
                     imagePath: filename,
                     title: "Processing..."
                 )
-                print("   ✅ Image placeholder saved")
+                Logger.clipboard.info("Image placeholder saved")
                 enhanceImageItem(newItem, pngData: pngData)
             } catch {
-                print("   ❌ Failed to save image item: \(error)")
+                Logger.clipboard.error("Failed to save image item: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -183,7 +186,7 @@ class ClipboardMonitor: ObservableObject {
             
             if let repo = await self.repository {
                 try? await repo.updateItem(item)
-                print("   ✅ Image analysis complete")
+                Logger.clipboard.info("Image analysis complete")
             }
             
             await self.enhanceItem(item)
@@ -206,11 +209,11 @@ class ClipboardMonitor: ObservableObject {
         }
         
         if repository.findDuplicate(content: content) != nil {
-            print("⚠️ [ClipboardMonitor] Skipping duplicate content")
+            Logger.clipboard.debug("Skipping duplicate content")
             return
         }
         
-        print("💾 [ClipboardMonitor] Saving new clipboard item...")
+        Logger.clipboard.info("Saving new clipboard item")
         
         let vectorId = UUID()
         Task {
@@ -225,10 +228,13 @@ class ClipboardMonitor: ObservableObject {
                     imagePath: nil,
                     title: nil
                 )
-                print("   ✅ Item saved: \(vectorId)")
-                enhanceItem(newItem)
+                Logger.clipboard.info("Item saved")
+                // Skip AI tag generation for sensitive content
+                if !newItem.isSensitive {
+                    enhanceItem(newItem)
+                }
             } catch {
-                print("   ❌ Failed to save: \(error)")
+                Logger.clipboard.error("Failed to save: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -259,7 +265,7 @@ class ClipboardMonitor: ObservableObject {
                     item.tags = tags
                     Task {
                         try? await repo.updateItem(item)
-                        print("   🏷️ Tags updated: \(tags)")
+                        Logger.clipboard.info("Tags updated: \(tags, privacy: .private)")
                     }
                 }
             }
@@ -290,12 +296,12 @@ class ClipboardService {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return appSupport.appendingPathComponent("Clippy/Images")
     }
-    
+
     func loadImage(from path: String) -> NSImage? {
         let imageURL = getImagesDirectory().appendingPathComponent(path)
         return NSImage(contentsOf: imageURL)
     }
-    
+
     func copyImageToClipboard(imagePath: String) {
         let imageURL = getImagesDirectory().appendingPathComponent(imagePath)
         guard let nsImage = NSImage(contentsOf: imageURL) else { return }

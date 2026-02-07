@@ -3,6 +3,7 @@ import Vision
 import AppKit
 import CoreGraphics
 import ScreenCaptureKit
+import os
 
 // MARK: - Document Structure Models
 
@@ -53,120 +54,86 @@ class VisionScreenParser: ObservableObject {
     }
     
     // MARK: - Main Parsing Function
-    
-    func parseCurrentScreen(completion: @escaping (Result<ParsedScreenContent, Error>) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            
-            let startTime = Date()
-            
-            DispatchQueue.main.async {
-                self.isProcessing = true
-            }
-            
-            // Step 1: Capture screen
-            guard let screenImage = self.captureScreen() else {
-                DispatchQueue.main.async {
-                    self.isProcessing = false
-                    completion(.failure(VisionParserError.screenCaptureFailed))
-                }
-                return
-            }
-            
 
-            
-            // Step 2: Process with Vision framework
-            self.processImageWithVision(screenImage) { [weak self] result in
-                guard let self = self else { return }
-                
-                let processingTime = Date().timeIntervalSince(startTime)
-                
-                DispatchQueue.main.async {
-                    self.isProcessing = false
-                    
-                    switch result {
-                    case .success(let parsedContent):
-                        let finalContent = ParsedScreenContent(
-                            fullText: parsedContent.fullText,
-                            structuredContent: parsedContent.structuredContent,
-                            confidence: parsedContent.confidence,
-                            processingTime: processingTime,
-                            timestamp: Date(),
-                            imageData: screenImage.tiffRepresentation // Store image data
-                        )
-                        
-                        self.lastParsedContent = finalContent
-                        completion(.success(finalContent))
-                        
-                    case .failure(let error):
-                        completion(.failure(error))
-                    }
-                }
+    func parseCurrentScreen() async -> Result<ParsedScreenContent, Error> {
+        await MainActor.run { self.isProcessing = true }
+
+        let startTime = Date()
+
+        // Step 1: Capture screen
+        guard let screenImage = await self.captureScreen() else {
+            await MainActor.run { self.isProcessing = false }
+            return .failure(VisionParserError.screenCaptureFailed)
+        }
+
+        // Step 2: Process with Vision framework
+        let result = await withCheckedContinuation { continuation in
+            self.processImageWithVision(screenImage) { result in
+                continuation.resume(returning: result)
             }
+        }
+
+        let processingTime = Date().timeIntervalSince(startTime)
+
+        switch result {
+        case .success(let parsedContent):
+            let finalContent = ParsedScreenContent(
+                fullText: parsedContent.fullText,
+                structuredContent: parsedContent.structuredContent,
+                confidence: parsedContent.confidence,
+                processingTime: processingTime,
+                timestamp: Date(),
+                imageData: screenImage.tiffRepresentation // Store image data
+            )
+
+            await MainActor.run {
+                self.lastParsedContent = finalContent
+                self.isProcessing = false
+            }
+            return .success(finalContent)
+
+        case .failure(let error):
+            await MainActor.run { self.isProcessing = false }
+            return .failure(error)
         }
     }
     
     // MARK: - Screen Capture
-    
-    private func captureScreen() -> NSImage? {
-        guard NSScreen.main != nil else { return nil }
-        
 
-        
+    private func captureScreen() async -> NSImage? {
+        guard NSScreen.main != nil else { return nil }
+
         // Use ScreenCaptureKit for macOS 12.3+
         if #available(macOS 12.3, *) {
-            return captureWithScreenCaptureKit()
+            return await captureWithScreenCaptureKit()
         } else {
             return nil
         }
     }
-    
+
     @available(macOS 12.3, *)
-    private func captureWithScreenCaptureKit() -> NSImage? {
-        var resultImage: NSImage?
-        let semaphore = DispatchSemaphore(value: 0)
-        
-        Task {
-            do {
-                // Get available content (screens and windows)
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                
-                guard let display = content.displays.first else {
-                    semaphore.signal()
-                    return
-                }
-                
-                // Create filter to capture the entire display
-                let filter = SCContentFilter(display: display, excludingWindows: [])
-                
-                // Configure capture settings
-                let config = SCStreamConfiguration()
-                config.width = Int(display.width * 2) // Retina
-                config.height = Int(display.height * 2)
-                config.showsCursor = false
-                config.capturesAudio = false
-                
-                // Capture single screenshot
-                let cgImage = try await SCScreenshotManager.captureImage(
-                    contentFilter: filter,
-                    configuration: config
-                )
-                                resultImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-                
-            } catch {
-                print("❌ [VisionScreenParser] Screen capture error: \(error)")
-            }
-            
-            semaphore.signal()
+    private func captureWithScreenCaptureKit() async -> NSImage? {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+
+            guard let display = content.displays.first else { return nil }
+
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+
+            let config = SCStreamConfiguration()
+            config.width = Int(display.width * 2)
+            config.height = Int(display.height * 2)
+            config.showsCursor = false
+            config.capturesAudio = false
+
+            let cgImage = try await SCScreenshotManager.captureImage(
+                contentFilter: filter,
+                configuration: config
+            )
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        } catch {
+            return nil
         }
-        
-        // Wait for capture to complete (with timeout)
-        let result = semaphore.wait(timeout: .now() + 10.0)
-        if result == .timedOut {
-            print("❌ [VisionScreenParser] Screen capture timed out")
-        }
-        
-        return resultImage
     }
     
     // MARK: - Vision Processing
@@ -296,7 +263,7 @@ class VisionScreenParser: ObservableObject {
                 guard let self = self else { return }
                 
                 if let error = error {
-                    print("Error recognizing text in region: \(error)")
+                    Logger.services.error("Error recognizing text in region: \(error.localizedDescription, privacy: .public)")
                     return
                 }
                 
@@ -345,7 +312,7 @@ class VisionScreenParser: ObservableObject {
             do {
                 try handler.perform([regionTextRequest])
             } catch {
-                print("Error performing text recognition on region: \(error)")
+                Logger.services.error("Error performing text recognition on region: \(error.localizedDescription, privacy: .public)")
                 group.leave()
             }
         }
@@ -505,18 +472,17 @@ enum VisionParserError: LocalizedError {
 // MARK: - Extensions for Integration
 
 extension VisionScreenParser {
-    
+
     /// Convenience method for quick text extraction
-    func extractTextFromScreen(completion: @escaping (String?) -> Void) {
-        parseCurrentScreen { result in
-            switch result {
-            case .success(let content):
-                completion(content.fullText)
-            case .failure(let error):
-                print("Vision parsing error: \(error.localizedDescription)")
-                completion(nil)
-            }
+    func extractTextFromScreen() async -> String? {
+        let result = await parseCurrentScreen()
+        switch result {
+        case .success(let content):
+            return content.fullText
+        case .failure(let error):
+            Logger.services.error("Vision parsing error: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
     }
-    
+
 }

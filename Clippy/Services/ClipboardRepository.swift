@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import os
 
 @MainActor
 protocol ClipboardRepository {
@@ -24,9 +25,9 @@ protocol ClipboardRepository {
 @MainActor
 class SwiftDataClipboardRepository: ClipboardRepository {
     private let modelContext: ModelContext
-    private let vectorService: Clippy // The vector DB service
+    private let vectorService: VectorSearchService // The vector DB service
     
-    init(modelContext: ModelContext, vectorService: Clippy) {
+    init(modelContext: ModelContext, vectorService: VectorSearchService) {
         self.modelContext = modelContext
         self.vectorService = vectorService
     }
@@ -70,18 +71,23 @@ class SwiftDataClipboardRepository: ClipboardRepository {
         // Note: Autosave is usually enabled, but we can force it if needed.
         // try modelContext.save()
         
-        print("💾 [Repository] Saved item: \(title ?? "No Title") (ID: \(finalVectorId.uuidString))")
+        Logger.clipboard.info("Saved item: \(title ?? "No Title", privacy: .private) (ID: \(finalVectorId.uuidString, privacy: .private))")
         return newItem
     }
     
     func deleteItem(_ item: Item) async throws {
-        // 1. Remove from Vector DB
+        // 1. Remove image file from disk
+        if let imagePath = item.imagePath {
+            let imageURL = ClipboardService.shared.getImagesDirectory().appendingPathComponent(imagePath)
+            try? FileManager.default.removeItem(at: imageURL)
+        }
+
+        // 2. Remove from Vector DB
         if let vectorId = item.vectorId {
-             // 1. Remove from Vector DB (Async)
              try? await vectorService.deleteDocument(vectorId: vectorId)
         }
-        
-        // 2. Remove from SwiftData
+
+        // 3. Remove from SwiftData
         modelContext.delete(item)
     }
     
@@ -93,9 +99,9 @@ class SwiftDataClipboardRepository: ClipboardRepository {
         if let vectorId = item.vectorId {
             let embeddingText = (item.title != nil && !item.title!.isEmpty) ? "\(item.title!)\n\n\(item.content)" : item.content
             
-             // Clippy.addDocument overwrites if ID exists (upsert)
+             // VectorSearchService.addDocument overwrites if ID exists (upsert)
             await vectorService.addDocument(vectorId: vectorId, text: embeddingText)
-            print("💾 [Repository] Updated item and re-indexed vector: \(item.title ?? "Untitled")")
+            Logger.clipboard.info("Updated item and re-indexed vector: \(item.title ?? "Untitled", privacy: .private)")
         }
     }
     

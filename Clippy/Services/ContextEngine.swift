@@ -65,10 +65,10 @@ class ContextEngine: ObservableObject {
         var window: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &window)
         
-        guard result == .success, let windowElement = window else { return nil }
-        
+        guard result == .success, let windowElement = window as? AXUIElement else { return nil }
+
         var title: CFTypeRef?
-        let titleResult = AXUIElementCopyAttributeValue(windowElement as! AXUIElement, kAXTitleAttribute as CFString, &title)
+        let titleResult = AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &title)
         
         if titleResult == .success, let windowTitle = title as? String {
             return windowTitle
@@ -83,29 +83,29 @@ class ContextEngine: ObservableObject {
         let app = AXUIElementCreateApplication(pid)
         var focusedWindow: CFTypeRef?
         let windowResult = AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedWindow)
-        guard windowResult == .success, let windowElement = focusedWindow else {
+        guard windowResult == .success, let windowElement = focusedWindow as? AXUIElement else {
             return ""
         }
         var focusedUIElement: CFTypeRef?
         AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedUIElement)
         var snapshotLines: [String] = []
         snapshotLines.append("App: \(currentAppName)")
-        if let title = try? (windowElement as! AXUIElement).attributeString(for: kAXTitleAttribute as CFString), !title.isEmpty {
+        if let title = try? windowElement.attributeString(for: kAXTitleAttribute as CFString), !title.isEmpty {
             snapshotLines.append("Window: \(title)")
         }
         // Collect static labels for quick context
-        let staticSummary = collectStaticTexts(from: windowElement as! AXUIElement, limit: 6)
+        let staticSummary = collectStaticTexts(from: windowElement, limit: 6)
         if !staticSummary.isEmpty {
             snapshotLines.append("Static Content: \(staticSummary)")
         }
-        if let focused = focusedUIElement {
+        if let focused = focusedUIElement as? AXUIElement {
             snapshotLines.append("Focused Element:")
             var seenFocused = Set<String>()
-            snapshotLines.append(contentsOf: describeElement(focused as! AXUIElement, depth: 1, maxDepth: 2, siblingsLimit: 4, dedupe: &seenFocused))
+            snapshotLines.append(contentsOf: describeElement(focused, depth: 1, maxDepth: 2, siblingsLimit: 4, dedupe: &seenFocused))
         }
         snapshotLines.append("Visible Elements:")
         var seen = Set<String>()
-        snapshotLines.append(contentsOf: describeElement(windowElement as! AXUIElement, depth: 1, maxDepth: 2, siblingsLimit: 8, dedupe: &seen))
+        snapshotLines.append(contentsOf: describeElement(windowElement, depth: 1, maxDepth: 2, siblingsLimit: 8, dedupe: &seen))
         return snapshotLines.joined(separator: "\n")
     }
     

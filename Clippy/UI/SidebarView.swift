@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import os
 
 enum NavigationCategory: String, CaseIterable, Identifiable {
     case allItems = "All Items"
@@ -155,9 +156,9 @@ struct SidebarView: View {
                     try await repository.deleteItem(item)
                 }
                 
-                print("🗑️ [SidebarView] Cleared all \(items.count) clipboard items")
+                Logger.ui.info("Cleared all \(items.count, privacy: .public) clipboard items")
             } catch {
-                print("❌ [SidebarView] Failed to clear history: \(error)")
+                Logger.ui.error("Failed to clear history: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -165,7 +166,7 @@ struct SidebarView: View {
     private func reindexSearch() {
         Task {
             do {
-                print("🔄 [SidebarView] Starting re-indexing...")
+                Logger.ui.info("Starting re-indexing")
                 let descriptor = FetchDescriptor<Item>()
                 let items = try modelContext.fetch(descriptor)
                 
@@ -176,13 +177,13 @@ struct SidebarView: View {
                 }
                 
                 if !documents.isEmpty {
-                    await container.clippy.addDocuments(items: documents)
-                    print("✅ [SidebarView] Re-indexed \(documents.count) items")
+                    await container.vectorSearch.addDocuments(items: documents)
+                    Logger.ui.info("Re-indexed \(documents.count, privacy: .public) items")
                 } else {
-                    print("⚠️ [SidebarView] No items to re-index")
+                    Logger.ui.warning("No items to re-index")
                 }
             } catch {
-                print("❌ [SidebarView] Failed to re-index: \(error)")
+                Logger.ui.error("Failed to re-index: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Carbon
+import os
 
 @MainActor
 class HotkeyManager: ObservableObject {
@@ -8,13 +9,11 @@ class HotkeyManager: ObservableObject {
     
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var onTrigger: (() -> Void)?
     private var onVisionTrigger: (() -> Void)?
     private var onTextCaptureTrigger: (() -> Void)?
     private var onVoiceCaptureTrigger: (() -> Void)?
-    
-    func startListening(onTrigger: @escaping () -> Void, onVisionTrigger: @escaping () -> Void, onTextCaptureTrigger: @escaping () -> Void, onVoiceCaptureTrigger: @escaping () -> Void) {
-        self.onTrigger = onTrigger
+
+    func startListening(onVisionTrigger: @escaping () -> Void, onTextCaptureTrigger: @escaping () -> Void, onVoiceCaptureTrigger: @escaping () -> Void) {
         self.onVisionTrigger = onVisionTrigger
         self.onTextCaptureTrigger = onTextCaptureTrigger
         self.onVoiceCaptureTrigger = onVoiceCaptureTrigger
@@ -33,7 +32,7 @@ class HotkeyManager: ObservableObject {
                 
                 // Check for Option+X (text capture trigger)
                 if event.flags.contains(.maskAlternate) && event.getIntegerValueField(.keyboardEventKeycode) == 7 { // 7 = X
-                    print("⌨️ [HotkeyManager] Option+X detected!")
+                    Logger.services.info("Option+X detected")
                     DispatchQueue.main.async {
                         manager.onTextCaptureTrigger?()
                     }
@@ -42,7 +41,7 @@ class HotkeyManager: ObservableObject {
                 
                 // Check for Option+Space (voice capture trigger)
                 if event.flags.contains(.maskAlternate) && event.getIntegerValueField(.keyboardEventKeycode) == 49 { // 49 = Space
-                    print("🎙️ [HotkeyManager] Option+Space detected!")
+                    Logger.services.info("Option+Space detected")
                     DispatchQueue.main.async {
                         manager.onVoiceCaptureTrigger?()
                     }
@@ -51,22 +50,9 @@ class HotkeyManager: ObservableObject {
                 
                 // Check for Option+V (vision parsing)
                 if event.flags.contains(.maskAlternate) && event.getIntegerValueField(.keyboardEventKeycode) == 9 { // 9 = V
-                    print("⌨️ [HotkeyManager] Option+V detected!")
+                    Logger.services.info("Option+V detected")
                     DispatchQueue.main.async {
                         manager.onVisionTrigger?()
-                    }
-                    return nil // Consume event
-                }
-                
-                // Check for Option+S (legacy suggestions - kept for compatibility)
-                // S key code is 1.
-                // We need to be careful not to swallow valid shortcuts if other modifiers are pressed.
-                // But here we only check for .maskAlternate (Option key).
-                
-                if event.flags.contains(.maskAlternate) && event.getIntegerValueField(.keyboardEventKeycode) == 1 { // 1 = S
-                    print("⌨️ [HotkeyManager] Option+S detected!")
-                    DispatchQueue.main.async {
-                        manager.onTrigger?()
                     }
                     return nil // Consume event
                 }
@@ -75,7 +61,7 @@ class HotkeyManager: ObservableObject {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            print("❌ [HotkeyManager] Failed to create event tap. Check Accessibility permissions.")
+            Logger.services.error("Failed to create event tap. Check Accessibility permissions.")
             return
         }
         
