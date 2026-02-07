@@ -6,7 +6,7 @@ struct ClippyMascotView: View {
     @ObservedObject var mascotState: ClippyMascotState
     @State private var isDragging = false
 
-    private let mascotSize: CGFloat = 64
+    private let mascotSize: CGFloat = 128
 
     var body: some View {
         if mascotState.isVisible {

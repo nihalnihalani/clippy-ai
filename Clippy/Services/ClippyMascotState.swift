@@ -82,7 +82,7 @@ enum MascotActivityState {
 @MainActor
 class ClippyMascotState: ObservableObject {
     // MARK: - Published State
-    @Published private(set) var currentAnimation: MascotAnimation = .sleep
+    @Published private(set) var currentAnimation: MascotAnimation = .hi
     @Published var isVisible: Bool {
         didSet { UserDefaults.standard.set(isVisible, forKey: "MascotVisible") }
     }
