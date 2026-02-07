@@ -140,6 +140,7 @@ struct ClipboardDetailView: View {
                                             .foregroundColor(.secondary)
                                         Spacer()
                                         Button {
+                                            container.clipboardMonitor.skipNextClipboardChange = true
                                             NSPasteboard.general.clearContents()
                                             NSPasteboard.general.setString(result, forType: .string)
                                             showTransformCopied = true
@@ -233,6 +234,8 @@ struct ClipboardDetailView: View {
     // MARK: - Actions
     
     private func copyContentWithFeedback() {
+        container.clipboardMonitor.skipNextClipboardChange = true
+
         if item.contentType == "image", let imagePath = item.imagePath {
             ClipboardService.shared.copyImageToClipboard(imagePath: imagePath)
         } else {

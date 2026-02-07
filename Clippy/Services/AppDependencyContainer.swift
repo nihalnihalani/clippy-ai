@@ -19,6 +19,7 @@ class AppDependencyContainer: ObservableObject {
     let geminiService: GeminiService
     let audioRecorder: AudioRecorder
     let queryOrchestrator: QueryOrchestrator
+    let usageTracker: UsageTracker
 
     // Multi-provider AI
     let claudeProvider: ClaudeProvider
@@ -57,6 +58,7 @@ class AppDependencyContainer: ObservableObject {
         self.searchOverlayController = SearchOverlayController()
         self.audioRecorder = AudioRecorder()
         self.localAIService = LocalAIService()
+        self.usageTracker = UsageTracker()
         self.geminiService = GeminiService(apiKey: KeychainHelper.load(key: "Gemini_API_Key") ?? "")
         self.textCaptureService = TextCaptureService()
 
@@ -92,8 +94,9 @@ class AppDependencyContainer: ObservableObject {
         registry.register(openAIProvider)
         registry.register(ollamaProvider)
 
-        // Wire AIRouter into QueryOrchestrator for new provider routing
+        // Wire AIRouter and UsageTracker into QueryOrchestrator
         queryOrchestrator.aiRouter = aiRouter
+        queryOrchestrator.usageTracker = usageTracker
 
         // Detect Ollama availability in background
         Task { await ollamaProvider.detectAvailability() }

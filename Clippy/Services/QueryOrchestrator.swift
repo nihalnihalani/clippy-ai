@@ -11,6 +11,7 @@ class QueryOrchestrator: ObservableObject {
     private let geminiService: GeminiService
     private let localAIService: LocalAIService
     var aiRouter: AIRouter?
+    var usageTracker: UsageTracker?
 
     @Published var isProcessing = false
 
@@ -98,6 +99,7 @@ class QueryOrchestrator: ObservableObject {
                 clipboardContext: simpleContext,
                 appName: appName
             )
+            usageTracker?.recordCall(providerId: "gemini", estimatedTokens: query.count / 4 + 256)
 
         case .local:
             var fullAnswer = ""
@@ -116,6 +118,7 @@ class QueryOrchestrator: ObservableObject {
                 Logger.ai.error("Streaming error: \(error.localizedDescription, privacy: .public)")
                 answer = nil
             }
+            usageTracker?.recordCall(providerId: "local", estimatedTokens: query.count / 4 + 256)
             imageIndex = nil
 
         case .claude, .openai, .ollama:
@@ -125,6 +128,7 @@ class QueryOrchestrator: ObservableObject {
                 clipboardContext: clipboardContext,
                 appName: appName
             )
+            usageTracker?.recordCall(providerId: aiServiceType.rawValue.lowercased(), estimatedTokens: query.count / 4 + 256)
             imageIndex = nil
         }
 

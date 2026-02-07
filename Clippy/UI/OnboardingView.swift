@@ -188,6 +188,30 @@ struct OnboardingView: View {
                     description: "Google's Gemini API. Requires an API key.",
                     badge: nil
                 )
+
+                aiOptionCard(
+                    service: .claude,
+                    icon: "brain.head.profile",
+                    title: "Claude (Cloud)",
+                    description: "Anthropic's Claude API. Requires an API key.",
+                    badge: nil
+                )
+
+                aiOptionCard(
+                    service: .openai,
+                    icon: "sparkle",
+                    title: "OpenAI (Cloud)",
+                    description: "GPT-4o Mini. Requires an API key.",
+                    badge: nil
+                )
+
+                aiOptionCard(
+                    service: .ollama,
+                    icon: "server.rack",
+                    title: "Ollama (Local)",
+                    description: "Self-hosted models via Ollama. No API key needed.",
+                    badge: nil
+                )
             }
             .padding(.horizontal, 24)
 

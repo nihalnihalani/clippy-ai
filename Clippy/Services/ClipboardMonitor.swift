@@ -351,7 +351,11 @@ class ClipboardService {
     
     func getImagesDirectory() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("Clippy/Images")
+        let imagesDir = appSupport.appendingPathComponent("Clippy/Images")
+        if !FileManager.default.fileExists(atPath: imagesDir.path) {
+            try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
+        }
+        return imagesDir
     }
 
     func loadImage(from path: String) -> NSImage? {

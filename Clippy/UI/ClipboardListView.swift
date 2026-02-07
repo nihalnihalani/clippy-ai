@@ -105,7 +105,6 @@ struct ClipboardListView: View {
                 return .handled
             }
         }
-        .navigationTitle(category?.rawValue ?? "Clipboard")
         .onChange(of: searchText) { _, newValue in
             // Cancel previous task
             searchTask?.cancel()
@@ -227,6 +226,7 @@ struct ClipboardListView: View {
         Task {
             guard let result = await container.localAIService.transformText(text: item.content, instruction: instruction) else { return }
             await MainActor.run {
+                container.clipboardMonitor.skipNextClipboardChange = true
                 ClipboardService.shared.copyTextToClipboard(result)
             }
         }

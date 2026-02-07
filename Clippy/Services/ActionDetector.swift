@@ -136,7 +136,8 @@ class ActionDetector {
             }
         }
         
-        // Deduplicate
-        return Array(Set(actions))
+        // Deduplicate while preserving order
+        var seen = Set<ClipboardAction>()
+        return actions.filter { seen.insert($0).inserted }
     }
 }

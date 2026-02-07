@@ -53,30 +53,44 @@ class AIProviderRegistry: ObservableObject {
 @MainActor
 class AIRouter: ObservableObject {
     private let registry: AIProviderRegistry
-    private let circuitBreakers: [String: CircuitBreaker]
+    private var circuitBreakers: [String: CircuitBreaker] = [:]
 
     @Published var preferredProviderId: String
 
     init(registry: AIProviderRegistry, preferredProviderId: String) {
         self.registry = registry
         self.preferredProviderId = preferredProviderId
-        self.circuitBreakers = [:]
+    }
+
+    /// Get or create a circuit breaker for a provider.
+    private func breaker(for providerId: String) -> CircuitBreaker {
+        if let existing = circuitBreakers[providerId] {
+            return existing
+        }
+        let cb = CircuitBreaker(name: providerId)
+        circuitBreakers[providerId] = cb
+        return cb
     }
 
     /// Resolve the best available provider using the fallback chain:
     /// preferred -> any available cloud -> local (always available).
-    func resolve() -> (any AIProvider)? {
+    /// Skips providers whose circuit breakers are open.
+    func resolve() async -> (any AIProvider)? {
         // 1. Try preferred
-        if let preferred = registry.provider(for: preferredProviderId), preferred.isAvailable {
+        if let preferred = registry.provider(for: preferredProviderId),
+           preferred.isAvailable,
+           await breaker(for: preferred.id).canExecute {
             return preferred
         }
 
         // 2. Try any available cloud provider
-        if let cloud = registry.availableProviders().first(where: { $0.providerType == .cloud }) {
-            return cloud
+        for provider in registry.availableProviders() where provider.providerType == .cloud {
+            if await breaker(for: provider.id).canExecute {
+                return provider
+            }
         }
 
-        // 3. Fall back to local (always available)
+        // 3. Fall back to local (always available, no circuit breaker needed)
         if let local = registry.availableProviders().first(where: { $0.providerType == .local }) {
             return local
         }
@@ -89,12 +103,19 @@ class AIRouter: ObservableObject {
         clipboardContext: [RAGContextItem],
         appName: String?
     ) async -> String? {
-        guard let provider = resolve() else {
+        guard let provider = await resolve() else {
             Logger.ai.error("No AI provider available")
             return nil
         }
         Logger.ai.info("Routing query to: \(provider.displayName, privacy: .public)")
-        return await provider.generateAnswer(question: question, clipboardContext: clipboardContext, appName: appName)
+        let cb = breaker(for: provider.id)
+        let result = await provider.generateAnswer(question: question, clipboardContext: clipboardContext, appName: appName)
+        if result != nil {
+            await cb.recordSuccess()
+        } else {
+            await cb.recordFailure()
+        }
+        return result
     }
 
     func generateTags(
@@ -102,7 +123,7 @@ class AIRouter: ObservableObject {
         appName: String?,
         context: String?
     ) async -> [String] {
-        guard let provider = resolve() else { return [] }
+        guard let provider = await resolve() else { return [] }
         return await provider.generateTags(content: content, appName: appName, context: context)
     }
 }

@@ -84,6 +84,7 @@ struct ContentView: View {
                 ),
                 selectedService: $container.selectedAIServiceType
             )
+            .environmentObject(container)
         }
         .onChange(of: clipboardMonitor.hasAccessibilityPermission) { _, granted in
             if granted && !hotkeyManager.isListening {
@@ -359,6 +360,7 @@ struct ContentView: View {
             if let imageIndex = imageIndex, imageIndex > 0, imageIndex <= contextItems.count {
                 let item = contextItems[imageIndex - 1]
                 if item.contentType == "image", let imagePath = item.imagePath {
+                    self.container.clipboardMonitor.skipNextClipboardChange = true
                     ClipboardService.shared.copyImageToClipboard(imagePath: imagePath)
                     
                     // Delete original item logic via Repository

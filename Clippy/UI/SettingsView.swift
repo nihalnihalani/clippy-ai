@@ -4,14 +4,15 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var container: AppDependencyContainer
     @Binding var apiKey: String
     @Binding var elevenLabsKey: String
     @Binding var selectedService: AIServiceType
 
-    @StateObject private var usageTracker = UsageTracker()
-
     @State private var tempGeminiKey: String = ""
     @State private var tempElevenLabsKey: String = ""
+    @State private var tempClaudeKey: String = ""
+    @State private var tempOpenAIKey: String = ""
     @State private var showExportSuccess: Bool = false
     @State private var showImportResult: String?
     @State private var showDiagnosticsCopied: Bool = false
@@ -88,6 +89,13 @@ struct SettingsView: View {
                 Button("Save") {
                     apiKey = tempGeminiKey
                     elevenLabsKey = tempElevenLabsKey
+                    // Save Claude and OpenAI keys to Keychain
+                    if !tempClaudeKey.isEmpty {
+                        KeychainHelper.save(key: "Claude_API_Key", value: tempClaudeKey)
+                    }
+                    if !tempOpenAIKey.isEmpty {
+                        KeychainHelper.save(key: "OpenAI_API_Key", value: tempOpenAIKey)
+                    }
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -156,6 +164,26 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
             }
 
+            settingsSection("Claude API Key") {
+                SecureField("Enter Claude API key...", text: $tempClaudeKey)
+                    .textFieldStyle(.roundedBorder)
+                    .onAppear { tempClaudeKey = KeychainHelper.load(key: "Claude_API_Key") ?? "" }
+
+                Text("Required for Claude AI service. Keys are stored in Keychain.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            settingsSection("OpenAI API Key") {
+                SecureField("Enter OpenAI API key...", text: $tempOpenAIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .onAppear { tempOpenAIKey = KeychainHelper.load(key: "OpenAI_API_Key") ?? "" }
+
+                Text("Required for OpenAI (GPT) service. Keys are stored in Keychain.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             settingsSection("ElevenLabs API Key") {
                 SecureField("Enter ElevenLabs API key...", text: $tempElevenLabsKey)
                     .textFieldStyle(.roundedBorder)
@@ -172,7 +200,7 @@ struct SettingsView: View {
                         Text("API Calls")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("\(usageTracker.todayCalls)")
+                        Text("\(container.usageTracker.todayCalls)")
                             .font(.title3)
                             .fontWeight(.medium)
                     }
@@ -181,15 +209,15 @@ struct SettingsView: View {
                         Text("Est. Cost")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(String(format: "$%.4f", usageTracker.todayCost))
+                        Text(String(format: "$%.4f", container.usageTracker.todayCost))
                             .font(.title3)
                             .fontWeight(.medium)
                     }
                 }
 
-                if !usageTracker.perProviderToday.isEmpty {
-                    ForEach(Array(usageTracker.perProviderToday.keys.sorted()), id: \.self) { provider in
-                        if let stats = usageTracker.perProviderToday[provider] {
+                if !container.usageTracker.perProviderToday.isEmpty {
+                    ForEach(Array(container.usageTracker.perProviderToday.keys.sorted()), id: \.self) { provider in
+                        if let stats = container.usageTracker.perProviderToday[provider] {
                             HStack {
                                 Text(provider.capitalized)
                                     .font(.caption)

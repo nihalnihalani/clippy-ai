@@ -59,20 +59,20 @@ class ElevenLabsService: ObservableObject {
     private func createMultipartBody(fileURL: URL, boundary: String) throws -> Data {
         var data = Data()
         let fileData = try Data(contentsOf: fileURL)
-        
+
         // Add Model ID param
-        data.append("--\(boundary)\r\n".data(using: .utf8)!)
-        data.append("Content-Disposition: form-data; name=\"model_id\"\r\n\r\n".data(using: .utf8)!)
-        data.append("scribe_v1\r\n".data(using: .utf8)!)
-        
+        data.append(Data("--\(boundary)\r\n".utf8))
+        data.append(Data("Content-Disposition: form-data; name=\"model_id\"\r\n\r\n".utf8))
+        data.append(Data("scribe_v1\r\n".utf8))
+
         // Add File
-        data.append("--\(boundary)\r\n".data(using: .utf8)!)
-        data.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n".data(using: .utf8)!)
-        data.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+        data.append(Data("--\(boundary)\r\n".utf8))
+        data.append(Data("Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n".utf8))
+        data.append(Data("Content-Type: audio/m4a\r\n\r\n".utf8))
         data.append(fileData)
-        data.append("\r\n".data(using: .utf8)!)
-        
-        data.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        data.append(Data("\r\n".utf8))
+
+        data.append(Data("--\(boundary)--\r\n".utf8))
         return data
     }
 }

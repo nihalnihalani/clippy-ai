@@ -58,7 +58,7 @@ class SearchOverlayController: ObservableObject {
         .modelContainer(modelContainer)
 
         let hostingView = NSHostingView(rootView: overlayView)
-        hostingView.frame = panel.contentView!.bounds
+        hostingView.frame = panel.contentView?.bounds ?? NSRect(origin: .zero, size: panelSize)
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView?.addSubview(hostingView)
 

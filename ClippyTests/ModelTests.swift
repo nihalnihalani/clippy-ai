@@ -22,9 +22,24 @@ final class ModelTests: XCTestCase {
     }
 
     func testAIServiceTypeCaseIterable() {
-        XCTAssertEqual(AIServiceType.allCases.count, 2)
+        XCTAssertEqual(AIServiceType.allCases.count, 5)
         XCTAssertTrue(AIServiceType.allCases.contains(.gemini))
         XCTAssertTrue(AIServiceType.allCases.contains(.local))
+        XCTAssertTrue(AIServiceType.allCases.contains(.claude))
+        XCTAssertTrue(AIServiceType.allCases.contains(.openai))
+        XCTAssertTrue(AIServiceType.allCases.contains(.ollama))
+    }
+
+    func testAIServiceTypeClaudeRawValue() {
+        XCTAssertEqual(AIServiceType.claude.rawValue, "Claude")
+    }
+
+    func testAIServiceTypeOpenAIRawValue() {
+        XCTAssertEqual(AIServiceType.openai.rawValue, "OpenAI")
+    }
+
+    func testAIServiceTypeOllamaRawValue() {
+        XCTAssertEqual(AIServiceType.ollama.rawValue, "Ollama")
     }
 
     // MARK: - InputMode
