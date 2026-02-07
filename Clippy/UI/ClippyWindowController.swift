@@ -241,10 +241,7 @@ class ClippyWindowController: ObservableObject {
             return nil
         }
         
-        guard let focusedUIElement = focusedElement as? AXUIElement else {
-            Logger.ui.warning("Focused element is not an AXUIElement")
-            return nil
-        }
+        let focusedUIElement = focusedElement as! AXUIElement
 
         // Check if the focused element is a text input (text field, text area, etc.)
         if !isTextInputElement(focusedUIElement) {
@@ -294,10 +291,10 @@ class ClippyWindowController: ObservableObject {
         var positionRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionRef)
         
-        guard result == AXError.success,
-              let positionValue = positionRef as? AXValue else {
+        guard result == AXError.success, let ref = positionRef else {
             return nil
         }
+        let positionValue = ref as! AXValue
 
         var point = NSPoint()
         let success = AXValueGetValue(positionValue, .cgPoint, &point)
@@ -309,10 +306,10 @@ class ClippyWindowController: ObservableObject {
         var sizeRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef)
         
-        guard result == AXError.success,
-              let sizeValue = sizeRef as? AXValue else {
+        guard result == AXError.success, let ref = sizeRef else {
             return nil
         }
+        let sizeValue = ref as! AXValue
 
         var size = NSSize()
         let success = AXValueGetValue(sizeValue, .cgSize, &size)
@@ -339,11 +336,11 @@ class ClippyWindowController: ObservableObject {
             &caretBoundsRef
         )
         
-        guard boundsResult == AXError.success,
-              let caretBoundsValue = caretBoundsRef as? AXValue else {
+        guard boundsResult == AXError.success, let ref = caretBoundsRef else {
             Logger.ui.warning("Unable to get caret bounds")
             return nil
         }
+        let caretBoundsValue = ref as! AXValue
 
         var caretBounds = CGRect()
         let success = AXValueGetValue(caretBoundsValue, .cgRect, &caretBounds)

@@ -25,6 +25,15 @@ struct OnboardingView: View {
                     .foregroundColor(.secondary)
                 }
 
+                if currentStep < 3 {
+                    Button("Skip") {
+                        onComplete()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary.opacity(0.7))
+                    .font(.system(size: 12))
+                }
+
                 Spacer()
 
                 // Step indicators
@@ -52,7 +61,7 @@ struct OnboardingView: View {
             }
             .padding(24)
         }
-        .frame(width: 520, height: 480)
+        .frame(width: 520, height: 560)
     }
 
     // MARK: - Step 1: Welcome
@@ -109,7 +118,7 @@ struct OnboardingView: View {
                     color: .purple,
                     title: "Screen Recording",
                     description: "Enables vision parsing (Option+V) to capture screen text",
-                    isGranted: false,
+                    isGranted: CGPreflightScreenCaptureAccess(),
                     settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
                 )
             }
@@ -160,64 +169,64 @@ struct OnboardingView: View {
     // MARK: - Step 3: Choose AI
 
     private var aiStep: some View {
-        VStack(spacing: 24) {
-            Spacer()
+        ScrollView {
+            VStack(spacing: 20) {
+                Text("Choose Your AI")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .padding(.top, 16)
 
-            Text("Choose Your AI")
-                .font(.system(size: 24, weight: .bold, design: .rounded))
+                Text("Clippy uses AI for smart tagging and search. You can change this later in Settings.")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
 
-            Text("Clippy uses AI for smart tagging and search. You can change this later in Settings.")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+                VStack(spacing: 10) {
+                    aiOptionCard(
+                        service: .local,
+                        icon: "desktopcomputer",
+                        title: "Local AI (Recommended)",
+                        description: "Runs on your Mac. Private, no API key needed.",
+                        badge: "Private"
+                    )
 
-            VStack(spacing: 12) {
-                aiOptionCard(
-                    service: .local,
-                    icon: "desktopcomputer",
-                    title: "Local AI (Recommended)",
-                    description: "Runs on your Mac. Private, no API key needed.",
-                    badge: "Private"
-                )
+                    aiOptionCard(
+                        service: .gemini,
+                        icon: "cloud",
+                        title: "Gemini (Cloud)",
+                        description: "Google's Gemini API. Requires an API key.",
+                        badge: nil
+                    )
 
-                aiOptionCard(
-                    service: .gemini,
-                    icon: "cloud",
-                    title: "Gemini (Cloud)",
-                    description: "Google's Gemini API. Requires an API key.",
-                    badge: nil
-                )
+                    aiOptionCard(
+                        service: .claude,
+                        icon: "brain.head.profile",
+                        title: "Claude (Cloud)",
+                        description: "Anthropic's Claude API. Requires an API key.",
+                        badge: nil
+                    )
 
-                aiOptionCard(
-                    service: .claude,
-                    icon: "brain.head.profile",
-                    title: "Claude (Cloud)",
-                    description: "Anthropic's Claude API. Requires an API key.",
-                    badge: nil
-                )
+                    aiOptionCard(
+                        service: .openai,
+                        icon: "sparkle",
+                        title: "OpenAI (Cloud)",
+                        description: "GPT-4o Mini. Requires an API key.",
+                        badge: nil
+                    )
 
-                aiOptionCard(
-                    service: .openai,
-                    icon: "sparkle",
-                    title: "OpenAI (Cloud)",
-                    description: "GPT-4o Mini. Requires an API key.",
-                    badge: nil
-                )
-
-                aiOptionCard(
-                    service: .ollama,
-                    icon: "server.rack",
-                    title: "Ollama (Local)",
-                    description: "Self-hosted models via Ollama. No API key needed.",
-                    badge: nil
-                )
+                    aiOptionCard(
+                        service: .ollama,
+                        icon: "server.rack",
+                        title: "Ollama (Local)",
+                        description: "Self-hosted models via Ollama. No API key needed.",
+                        badge: nil
+                    )
+                }
+                .padding(.horizontal, 24)
             }
-            .padding(.horizontal, 24)
-
-            Spacer()
+            .padding(.horizontal, 32)
+            .padding(.vertical, 16)
         }
-        .padding(32)
     }
 
     private func aiOptionCard(service: AIServiceType, icon: String, title: String, description: String, badge: String?) -> some View {

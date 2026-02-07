@@ -116,7 +116,38 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
 
         return await generateWithContainer(container, prompt: prompt, maxTokens: maxTokens)
     }
-    
+
+    /// Wrapper that enforces a 30-second wall-clock timeout on generation.
+    private func generateWithTimeout(prompt: String, maxTokens: Int = 512) async -> String? {
+        do {
+            return try await withThrowingTaskGroup(of: String?.self) { group in
+                group.addTask {
+                    return await self.generate(prompt: prompt, maxTokens: maxTokens)
+                }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+                    throw LocalAITimeoutError.timeout
+                }
+
+                // Return first completed result
+                guard let result = try await group.next() else {
+                    group.cancelAll()
+                    return nil
+                }
+                group.cancelAll()
+                return result
+            }
+        } catch is LocalAITimeoutError {
+            Logger.ai.warning("Local AI generation timed out after 30 seconds")
+            lastError = "Generation timed out after 30 seconds"
+            return nil
+        } catch {
+            Logger.ai.error("Local AI generation error: \(error.localizedDescription, privacy: .public)")
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
     private func generateWithContainer(_ container: ModelContainer, prompt: String, maxTokens: Int) async -> String? {
         do {
             let result = try await container.perform { context in
@@ -173,7 +204,7 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
         <|im_start|>assistant
         """
         
-        return await generate(prompt: prompt, maxTokens: 256)
+        return await generateWithTimeout(prompt: prompt, maxTokens: 256)
     }
 
     /// Generate a streaming answer
@@ -205,7 +236,7 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
         
         return AsyncThrowingStream { continuation in
             Task {
-                if let response = await self.generate(prompt: prompt, maxTokens: 512) {
+                if let response = await self.generateWithTimeout(prompt: prompt, maxTokens: 512) {
                     let words = response.components(separatedBy: " ")
                     for word in words {
                         continuation.yield(word + " ")
@@ -231,7 +262,7 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
         <|im_start|>assistant
         """
         
-        guard let response = await generate(prompt: prompt, maxTokens: 50) else {
+        guard let response = await generateWithTimeout(prompt: prompt, maxTokens: 50) else {
             return []
         }
         
@@ -272,11 +303,15 @@ class LocalAIService: ObservableObject, AIServiceProtocol {
         <|im_start|>assistant
         """
         
-        return await generate(prompt: prompt, maxTokens: 512)
+        return await generateWithTimeout(prompt: prompt, maxTokens: 512)
     }
     
     // MARK: - Helper Methods
     
+    private enum LocalAITimeoutError: Error {
+        case timeout
+    }
+
     private func buildContextString(_ clipboardContext: [RAGContextItem], maxLength: Int = 5000) -> String {
         if clipboardContext.isEmpty { return "No context available." }
         

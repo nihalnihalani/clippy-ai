@@ -80,9 +80,9 @@ class ClipboardMonitor: ObservableObject, ClipboardMonitoring {
         timer = Timer.scheduledTimer(withTimeInterval: currentPollingInterval, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self, self.isMonitoring else { return }
-                self.contextEngine?.updateContext()
                 let changed = self.checkClipboardAndReportChange()
                 if changed {
+                    self.contextEngine?.updateContext()
                     self.currentPollingInterval = self.minPollingInterval
                 } else {
                     self.currentPollingInterval = min(
@@ -174,7 +174,9 @@ class ClipboardMonitor: ObservableObject, ClipboardMonitoring {
                     tags: [],
                     vectorId: vectorId,
                     imagePath: filename,
-                    title: "Processing..."
+                    title: "Processing...",
+                    isSensitive: false,
+                    expiresAt: nil
                 )
                 Logger.clipboard.info("Image placeholder saved")
                 enhanceImageItem(newItem, pngData: pngData)
@@ -254,14 +256,10 @@ class ClipboardMonitor: ObservableObject, ClipboardMonitoring {
                     tags: [],
                     vectorId: vectorId,
                     imagePath: nil,
-                    title: nil
+                    title: nil,
+                    isSensitive: isSensitive,
+                    expiresAt: isSensitive ? Date().addingTimeInterval(3600) : nil
                 )
-
-                // Persist sensitivity flag and set expiry for sensitive items
-                if isSensitive {
-                    newItem.isSensitiveFlag = true
-                    newItem.expiresAt = Date().addingTimeInterval(3600) // 1 hour
-                }
 
                 Logger.clipboard.info("Item saved (sensitive: \(isSensitive, privacy: .public))")
                 // Skip AI tag generation for sensitive content

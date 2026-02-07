@@ -48,6 +48,11 @@ class QueryOrchestrator: ObservableObject {
         isProcessing = true
         defer { isProcessing = false }
 
+        // Guard against nil aiRouter for providers that need it
+        if aiRouter == nil && [.claude, .openai, .ollama].contains(aiServiceType) {
+            Logger.ai.warning("aiRouter is nil but \(aiServiceType.rawValue, privacy: .public) is selected — queries will fail")
+        }
+
         // 1. Semantic vector search
         let searchResults = await vectorSearch.search(query: query, limit: 30)
         let foundVectorIds = Set(searchResults.map { $0.0 })
@@ -135,9 +140,19 @@ class QueryOrchestrator: ObservableObject {
         let errorMessage: String?
         switch aiServiceType {
         case .gemini:
-            errorMessage = geminiService.lastErrorMessage
-        case .local, .claude, .openai, .ollama:
-            errorMessage = nil
+            errorMessage = answer == nil ? (geminiService.lastErrorMessage ?? "Gemini returned no response") : geminiService.lastErrorMessage
+        case .local:
+            errorMessage = answer == nil ? (localAIService.lastError ?? "Local AI returned no response") : nil
+        case .claude, .openai, .ollama:
+            if answer == nil {
+                if aiRouter == nil {
+                    errorMessage = "\(aiServiceType.rawValue) is not configured — check API key in Settings"
+                } else {
+                    errorMessage = "\(aiServiceType.rawValue) returned no response — all providers in fallback chain failed"
+                }
+            } else {
+                errorMessage = nil
+            }
         }
         return QueryResult(
             answer: answer,

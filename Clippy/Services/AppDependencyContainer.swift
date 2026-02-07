@@ -42,12 +42,14 @@ class AppDependencyContainer: ObservableObject {
         Logger.services.info("Initializing services...")
 
         // Load persisted AI service selection
+        let initialServiceType: AIServiceType
         if let saved = UserDefaults.standard.string(forKey: "SelectedAIService"),
            let savedType = AIServiceType(rawValue: saved) {
-            self.selectedAIServiceType = savedType
+            initialServiceType = savedType
         } else {
-            self.selectedAIServiceType = .local
+            initialServiceType = .local
         }
+        self.selectedAIServiceType = initialServiceType
 
         // 1. Initialize Independent Services
         self.vectorSearch = VectorSearchService()
@@ -72,7 +74,7 @@ class AppDependencyContainer: ObservableObject {
 
         // Determine preferred provider from persisted selection
         let preferredId: String
-        switch selectedAIServiceType {
+        switch initialServiceType {
         case .claude: preferredId = "claude"
         case .openai: preferredId = "openai"
         case .ollama: preferredId = "ollama"

@@ -12,7 +12,9 @@ protocol ClipboardRepository {
         tags: [String],
         vectorId: UUID?,
         imagePath: String?,
-        title: String?
+        title: String?,
+        isSensitive: Bool,
+        expiresAt: Date?
     ) async throws -> Item
 
     func deleteItem(_ item: Item) async throws
@@ -52,7 +54,9 @@ class SwiftDataClipboardRepository: ClipboardRepository {
         tags: [String] = [],
         vectorId: UUID? = nil,
         imagePath: String? = nil,
-        title: String? = nil
+        title: String? = nil,
+        isSensitive: Bool = false,
+        expiresAt: Date? = nil
     ) async throws -> Item {
         // 1. Create the SwiftData Item
         // Note: Init uses defaults for some fields, we set others after if needed
@@ -65,24 +69,29 @@ class SwiftDataClipboardRepository: ClipboardRepository {
             imagePath: imagePath
         )
         newItem.tags = tags
-        
+        newItem.isSensitiveFlag = isSensitive
+        newItem.expiresAt = expiresAt
+
         // 2. Add to Vector DB
         // If vectorId is provided, use it. Otherwise generate one.
         let finalVectorId = vectorId ?? UUID()
         newItem.vectorId = finalVectorId
-        
-        // Combine Title and Content for search embedding so both are searchable
-        // Logic mirrored from ClipboardMonitor
-        let embeddingText = (title != nil && !title!.isEmpty) ? "\(title!)\n\n\(content)" : content
-        
-        await vectorService.addDocument(vectorId: finalVectorId, text: embeddingText)
-        
+
+        // Skip vector DB embedding for sensitive content
+        if !isSensitive {
+            // Combine Title and Content for search embedding so both are searchable
+            // Logic mirrored from ClipboardMonitor
+            let embeddingText = (title != nil && !title!.isEmpty) ? "\(title!)\n\n\(content)" : content
+
+            await vectorService.addDocument(vectorId: finalVectorId, text: embeddingText)
+        }
+
         // 3. Save to SwiftData
         modelContext.insert(newItem)
-        
+
         // Note: Autosave is usually enabled, but we can force it if needed.
         // try modelContext.save()
-        
+
         Logger.clipboard.info("Saved item: \(title ?? "No Title", privacy: .private) (ID: \(finalVectorId.uuidString, privacy: .private))")
         return newItem
     }

@@ -8,7 +8,10 @@ struct SensitiveContentDetector {
                containsCreditCard(content) ||
                containsSSN(content) ||
                containsPrivateKey(content) ||
-               containsPassword(content)
+               containsPassword(content) ||
+               containsJWT(content) ||
+               containsBearerToken(content) ||
+               containsConnectionString(content)
     }
 
     /// Detect common API key patterns
@@ -31,7 +34,7 @@ struct SensitiveContentDetector {
 
     /// Detect credit card numbers using Luhn algorithm validation
     static func containsCreditCard(_ content: String) -> Bool {
-        let pattern = "\\b(?:\\d[ -]*?){13,19}\\b"
+        let pattern = "\\b(?:4\\d{3}|5[1-5]\\d{2}|3[47]\\d{2}|6(?:011|5\\d{2}))[- ]?(?:\\d{4}[- ]?){2}\\d{1,4}\\b"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
 
         let matches = regex.matches(in: content, range: NSRange(content.startIndex..., in: content))
@@ -90,5 +93,23 @@ struct SensitiveContentDetector {
         return patterns.contains { pattern in
             content.range(of: pattern, options: .regularExpression) != nil
         }
+    }
+
+    /// Detect JSON Web Tokens (JWT)
+    static func containsJWT(_ content: String) -> Bool {
+        let pattern = "eyJ[A-Za-z0-9\\-_]+\\.eyJ[A-Za-z0-9\\-_]+\\.[A-Za-z0-9\\-_.+/=]+"
+        return content.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// Detect Bearer authentication tokens
+    static func containsBearerToken(_ content: String) -> Bool {
+        let pattern = "[Bb]earer\\s+[A-Za-z0-9\\-._~+/]+=*"
+        return content.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// Detect database connection strings
+    static func containsConnectionString(_ content: String) -> Bool {
+        let pattern = "(mongodb|postgres|mysql|redis)://[^\\s]+"
+        return content.range(of: pattern, options: .regularExpression) != nil
     }
 }

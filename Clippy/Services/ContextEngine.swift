@@ -65,7 +65,8 @@ class ContextEngine: ObservableObject, ContextProviding {
         var window: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &window)
         
-        guard result == .success, let windowElement = window as? AXUIElement else { return nil }
+        guard result == .success, let windowRef = window else { return nil }
+        let windowElement = windowRef as! AXUIElement
 
         var title: CFTypeRef?
         let titleResult = AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &title)
@@ -83,9 +84,10 @@ class ContextEngine: ObservableObject, ContextProviding {
         let app = AXUIElementCreateApplication(pid)
         var focusedWindow: CFTypeRef?
         let windowResult = AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedWindow)
-        guard windowResult == .success, let windowElement = focusedWindow as? AXUIElement else {
+        guard windowResult == .success, let focusedWindowRef = focusedWindow else {
             return ""
         }
+        let windowElement = focusedWindowRef as! AXUIElement
         var focusedUIElement: CFTypeRef?
         AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedUIElement)
         var snapshotLines: [String] = []
@@ -98,7 +100,8 @@ class ContextEngine: ObservableObject, ContextProviding {
         if !staticSummary.isEmpty {
             snapshotLines.append("Static Content: \(staticSummary)")
         }
-        if let focused = focusedUIElement as? AXUIElement {
+        if let focusedRef = focusedUIElement {
+            let focused = focusedRef as! AXUIElement
             snapshotLines.append("Focused Element:")
             var seenFocused = Set<String>()
             snapshotLines.append(contentsOf: describeElement(focused, depth: 1, maxDepth: 2, siblingsLimit: 4, dedupe: &seenFocused))

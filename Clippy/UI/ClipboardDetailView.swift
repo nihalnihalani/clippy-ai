@@ -25,7 +25,7 @@ struct ClipboardDetailView: View {
                             .foregroundColor(.primary)
                             .lineLimit(2)
                             .textSelection(.enabled)
-                            .padding(.top, 80) // Visual clearance for Toolbar (since ignoresSafeArea is on)
+                            .padding(.top, 48) // Visual clearance for Toolbar (since ignoresSafeArea is on)
                         
                         HStack(spacing: 8) {
                             if let appName = item.appName {
@@ -37,16 +37,16 @@ struct ClipboardDetailView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.secondary)
                     }
-                    .padding(.horizontal, 32)
+                    .padding(.horizontal, 24)
                     .padding(.bottom, 24)
-                    
+
                     // Divider (Subtle)
                     Rectangle()
                         .fill(Color.primary.opacity(0.05))
                         .frame(height: 1)
-                        .padding(.horizontal, 32)
+                        .padding(.horizontal, 24)
                         .padding(.bottom, 24)
-                    
+
                     // Content Area
                     VStack(alignment: .leading, spacing: 0) {
                         if item.contentType == "image", let imagePath = item.imagePath {
@@ -69,8 +69,8 @@ struct ClipboardDetailView: View {
                                 .textSelection(.enabled)
                         }
                     }
-                    .padding(.horizontal, 32)
-                    
+                    .padding(.horizontal, 24)
+
                     // Tags Section
                     if !item.tags.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
@@ -91,8 +91,8 @@ struct ClipboardDetailView: View {
                                 }
                             }
                         }
-                        .padding(.top, 32)
-                        .padding(.horizontal, 32)
+                        .padding(.top, 24)
+                        .padding(.horizontal, 24)
                     }
 
                     // Transforms Section
@@ -167,11 +167,11 @@ struct ClipboardDetailView: View {
                                 }
                             }
                         }
-                        .padding(.top, 32)
-                        .padding(.horizontal, 32)
+                        .padding(.top, 24)
+                        .padding(.horizontal, 24)
                     }
 
-                    Spacer().frame(height: 100) // Clearance for floating bar
+                    Spacer().frame(height: 72) // Clearance for floating bar
                 }
             }
             
@@ -223,7 +223,7 @@ struct ClipboardDetailView: View {
                     .scaleEffect(isHoveringBar ? 1.02 : 1.0)
                     .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHoveringBar)
                     .onHover { isHoveringBar = $0 }
-                    .padding(32)
+                    .padding(20)
                 }
             }
         }

@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 struct KeychainHelper {
-    private static let serviceName = "com.clippy.app"
+    private static let serviceName = Bundle.main.bundleIdentifier ?? "com.clippy.app"
 
     @discardableResult
     static func save(key: String, value: String) -> Bool {

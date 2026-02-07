@@ -98,24 +98,61 @@ class AIRouter: ObservableObject {
         return nil
     }
 
+    /// Return an ordered fallback chain: preferred → other cloud → local.
+    /// Skips providers whose circuit breakers are open.
+    func resolveAll() async -> [any AIProvider] {
+        var chain: [any AIProvider] = []
+
+        // 1. Preferred first
+        if let preferred = registry.provider(for: preferredProviderId),
+           preferred.isAvailable,
+           await breaker(for: preferred.id).canExecute {
+            chain.append(preferred)
+        }
+
+        // 2. Other available cloud providers
+        for provider in registry.availableProviders() where provider.providerType == .cloud {
+            if provider.id != preferredProviderId, await breaker(for: provider.id).canExecute {
+                chain.append(provider)
+            }
+        }
+
+        // 3. Local fallback
+        if let local = registry.availableProviders().first(where: { $0.providerType == .local }) {
+            if !chain.contains(where: { $0.id == local.id }) {
+                chain.append(local)
+            }
+        }
+
+        return chain
+    }
+
     func generateAnswer(
         question: String,
         clipboardContext: [RAGContextItem],
         appName: String?
     ) async -> String? {
-        guard let provider = await resolve() else {
+        let providers = await resolveAll()
+        guard !providers.isEmpty else {
             Logger.ai.error("No AI provider available")
             return nil
         }
-        Logger.ai.info("Routing query to: \(provider.displayName, privacy: .public)")
-        let cb = breaker(for: provider.id)
-        let result = await provider.generateAnswer(question: question, clipboardContext: clipboardContext, appName: appName)
-        if result != nil {
-            await cb.recordSuccess()
-        } else {
-            await cb.recordFailure()
+
+        for provider in providers {
+            Logger.ai.info("Trying provider: \(provider.displayName, privacy: .public)")
+            let cb = breaker(for: provider.id)
+            let result = await provider.generateAnswer(question: question, clipboardContext: clipboardContext, appName: appName)
+            if let answer = result {
+                await cb.recordSuccess()
+                return answer
+            } else {
+                await cb.recordFailure()
+                Logger.ai.warning("Provider \(provider.displayName, privacy: .public) failed, trying next...")
+            }
         }
-        return result
+
+        Logger.ai.error("All providers failed")
+        return nil
     }
 
     func generateTags(
@@ -124,6 +161,13 @@ class AIRouter: ObservableObject {
         context: String?
     ) async -> [String] {
         guard let provider = await resolve() else { return [] }
-        return await provider.generateTags(content: content, appName: appName, context: context)
+        let cb = breaker(for: provider.id)
+        let result = await provider.generateTags(content: content, appName: appName, context: context)
+        if !result.isEmpty {
+            await cb.recordSuccess()
+        } else {
+            await cb.recordFailure()
+        }
+        return result
     }
 }

@@ -32,10 +32,9 @@ struct SidebarView: View {
     @Binding var selectedAIService: AIServiceType
     @ObservedObject var clippyController: ClippyWindowController
     @Binding var showSettings: Bool
+    @Binding var searchText: String
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var container: AppDependencyContainer
-    @State private var showClearConfirmation: Bool = false
-    @AppStorage("showSidebarShortcuts") private var showShortcuts: Bool = false
     @Query(sort: \Item.timestamp, order: .reverse) private var allItemsForCounts: [Item]
 
     var body: some View {
@@ -78,8 +77,8 @@ struct SidebarView: View {
                     Section("Recent Apps") {
                         ForEach(topApps, id: \.self) { appName in
                             Button {
-                                // We reuse .allItems but set a filter externally
-                                // For simplicity, select allItems; filtering by app is best done via search
+                                selection = .allItems
+                                searchText = appName
                             } label: {
                                 HStack {
                                     Image(systemName: "app.fill")
@@ -95,7 +94,7 @@ struct SidebarView: View {
                     }
                 }
             }
-            .padding(.top, 44) // Clear traffic lights
+            .padding(.top, 12) // Compact top
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .background(Color.clear)
@@ -122,7 +121,7 @@ struct SidebarView: View {
                             Text(service.rawValue).tag(service)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
                     .labelsHidden()
                 }
                 
@@ -136,60 +135,6 @@ struct SidebarView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-
-                // Assistant
-                HStack {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    Text("Assistant")
-                        .font(.system(size: 12))
-                    Spacer()
-                    Toggle("", isOn: $clippyController.followTextInput)
-                        .toggleStyle(.switch)
-                        .scaleEffect(0.7)
-                        .labelsHidden()
-                }
-                
-                Divider()
-                    .opacity(0.5)
-                
-                // Shortcuts Row (Left Aligned)
-                HStack {
-                    DisclosureGroup("Shortcuts", isExpanded: $showShortcuts) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            KeyboardShortcutHint(keys: "⇧⌘V", description: "Search")
-                            KeyboardShortcutHint(keys: "⌥X", description: "Ask")
-                            KeyboardShortcutHint(keys: "⌥V", description: "OCR")
-                            KeyboardShortcutHint(keys: "⌥␣", description: "Voice")
-                        }
-                        .padding(.top, 4)
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                    
-                    Spacer()
-                }
-                
-                // Actions Row (Buttons)
-                HStack(spacing: 8) {
-                    Button(action: reindexSearch) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Re-index Search")
-                    
-                    Button(role: .destructive, action: { showClearConfirmation = true }) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                    .help("Clear History")
-                    
-                    Spacer()
-                }
             }
             .padding(16)
             .background(.regularMaterial)
@@ -197,18 +142,6 @@ struct SidebarView: View {
         .scrollContentBackground(.hidden)
         .background(Color.clear)
         .ignoresSafeArea(edges: .top)
-        .confirmationDialog(
-            "Clear All Clipboard History?",
-            isPresented: $showClearConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Clear All", role: .destructive) {
-                clearAllHistory()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will permanently delete all clipboard items. This action cannot be undone.")
-        }
     }
     
     private func countForCategory(_ category: NavigationCategory) -> Int {
@@ -247,51 +180,6 @@ struct SidebarView: View {
         return trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")
     }
 
-    private func clearAllHistory() {
-        guard let repository = container.repository else { return }
-        
-        Task {
-            do {
-                // Fetch all items and delete them
-                let descriptor = FetchDescriptor<Item>()
-                let items = try modelContext.fetch(descriptor)
-                
-                for item in items {
-                    // Use repository to ensure consistent deletion (Files + Vector + Data)
-                    try await repository.deleteItem(item)
-                }
-                
-                Logger.ui.info("Cleared all \(items.count, privacy: .public) clipboard items")
-            } catch {
-                Logger.ui.error("Failed to clear history: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-    
-    private func reindexSearch() {
-        Task {
-            do {
-                Logger.ui.info("Starting re-indexing")
-                let descriptor = FetchDescriptor<Item>()
-                let items = try modelContext.fetch(descriptor)
-                
-                let documents = items.compactMap { item -> (UUID, String)? in
-                    guard let vid = item.vectorId else { return nil }
-                    let embeddingText = (item.title != nil && !item.title!.isEmpty) ? "\(item.title!)\n\n\(item.content)" : item.content
-                    return (vid, embeddingText)
-                }
-                
-                if !documents.isEmpty {
-                    await container.vectorSearch.addDocuments(items: documents)
-                    Logger.ui.info("Re-indexed \(documents.count, privacy: .public) items")
-                } else {
-                    Logger.ui.warning("No items to re-index")
-                }
-            } catch {
-                Logger.ui.error("Failed to re-index: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
 }
 
 // MARK: - Keyboard Shortcut Hint View

@@ -39,6 +39,7 @@ struct ClippyApp: App {
             for url in related {
                 try? FileManager.default.removeItem(at: url)
             }
+            UserDefaults.standard.set(true, forKey: "didResetDatabase")
 
             do {
                 return try ModelContainer(for: schema, configurations: [modelConfiguration])
@@ -56,22 +57,37 @@ struct ClippyApp: App {
     }()
 
     @StateObject private var container = AppDependencyContainer()
-
-
+    @State private var urlCopyText: String?
+    @State private var showURLCopyConfirmation: Bool = false
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(container)
                 .fontDesign(.rounded)
-                .preferredColorScheme(.dark)
                 .onAppear {
                     container.inject(modelContext: sharedModelContainer.mainContext)
                 }
                 .onOpenURL { url in
                     handleURLScheme(url)
                 }
+                .alert("External Copy Request", isPresented: $showURLCopyConfirmation) {
+                    Button("Allow") {
+                        if let text = urlCopyText {
+                            container.clipboardMonitor.skipNextClipboardChange = true
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(text, forType: .string)
+                        }
+                        urlCopyText = nil
+                    }
+                    Button("Deny", role: .cancel) {
+                        urlCopyText = nil
+                    }
+                } message: {
+                    Text("An external app wants to copy text to your clipboard:\n\"\(String((urlCopyText ?? "").prefix(100)))\"")
+                }
         }
+        .defaultSize(width: 960, height: 640)
         .modelContainer(sharedModelContainer)
 
         MenuBarExtra("Clippy", systemImage: "paperclip") {
@@ -103,9 +119,9 @@ struct ClippyApp: App {
             // clippy://copy?text=Hello
             if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
                let text = components.queryItems?.first(where: { $0.name == "text" })?.value {
-                Logger.services.info("URL scheme: copy text")
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
+                Logger.services.info("URL scheme: copy text requested")
+                urlCopyText = text
+                showURLCopyConfirmation = true
             }
 
         case "latest":
@@ -115,8 +131,13 @@ struct ClippyApp: App {
             var descriptor = FetchDescriptor<Item>(sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
             descriptor.fetchLimit = 1
             if let items = try? context.fetch(descriptor), let latest = items.first {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(latest.content, forType: .string)
+                if latest.isSensitive {
+                    Logger.services.warning("URL scheme: skipping sensitive item for latest copy")
+                } else {
+                    container.clipboardMonitor.skipNextClipboardChange = true
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(latest.content, forType: .string)
+                }
             }
 
         default:

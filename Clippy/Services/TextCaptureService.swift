@@ -100,7 +100,7 @@ class TextCaptureService: ObservableObject {
     func stopCapturing() {
         guard isCapturing else { return }
         
-        Logger.services.info("Stopping text capture (duration: \(captureStartTime?.timeIntervalSinceNow ?? 0, privacy: .public)s)")
+        Logger.services.info("Stopping text capture (duration: \(self.captureStartTime?.timeIntervalSinceNow ?? 0, privacy: .public)s)")
         
         if let eventTap = eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
@@ -114,7 +114,7 @@ class TextCaptureService: ObservableObject {
         
         // Store the length BEFORE clearing capturedText
         capturedTextLength = capturedText.count
-        Logger.services.info("Stored captured text length: \(capturedTextLength, privacy: .public) characters")
+        Logger.services.info("Stored captured text length: \(self.capturedTextLength, privacy: .public) characters")
 
         // Store captured text for undo
         lastCapturedText = capturedText

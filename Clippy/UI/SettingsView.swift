@@ -16,7 +16,12 @@ struct SettingsView: View {
     @State private var showExportSuccess: Bool = false
     @State private var showImportResult: String?
     @State private var showDiagnosticsCopied: Bool = false
+    @State private var showClearConfirmation: Bool = false
+    @State private var showReindexSuccess: Bool = false
     @State private var selectedTab: SettingsTab = .general
+    @State private var geminiKeyStatus: KeyValidationStatus = .untested
+    @State private var claudeKeyStatus: KeyValidationStatus = .untested
+    @State private var openaiKeyStatus: KeyValidationStatus = .untested
 
     enum SettingsTab: String, CaseIterable, Identifiable {
         case general = "General"
@@ -102,7 +107,7 @@ struct SettingsView: View {
             }
             .padding(16)
         }
-        .frame(width: 520, height: 520)
+        .frame(width: 520, height: 580)
     }
 
     // MARK: - General Tab
@@ -124,6 +129,7 @@ struct SettingsView: View {
                 HStack(spacing: 12) {
                     Button("Export Data") { exportData() }
                     Button("Import Data") { importData() }
+                    Button("Re-index Search") { reindexSearch() }
                 }
 
                 if showExportSuccess {
@@ -137,6 +143,34 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+
+                if showReindexSuccess {
+                    Text("Search index rebuilt successfully.")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+            }
+
+            settingsSection("Danger Zone") {
+                Button(role: .destructive) {
+                    showClearConfirmation = true
+                } label: {
+                    Label("Clear All Clipboard History", systemImage: "trash")
+                }
+                .confirmationDialog(
+                    "Clear All Clipboard History?",
+                    isPresented: $showClearConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Clear All", role: .destructive) { clearAllHistory() }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This will permanently delete all clipboard items. This action cannot be undone.")
+                }
+
+                Text("Permanently removes all items from your clipboard history.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -159,6 +193,24 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
                     .onAppear { tempGeminiKey = apiKey }
 
+                HStack {
+                    Button(action: { testGeminiKey() }) {
+                        HStack(spacing: 4) {
+                            if geminiKeyStatus == .testing {
+                                ProgressView().scaleEffect(0.6)
+                            }
+                            Text(geminiKeyStatus == .valid ? "Valid" : geminiKeyStatus == .invalid ? "Invalid" : "Test")
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .foregroundColor(geminiKeyStatus == .valid ? .green : geminiKeyStatus == .invalid ? .red : nil)
+                    .disabled(tempGeminiKey.isEmpty || geminiKeyStatus == .testing)
+
+                    Spacer()
+                }
+
                 Text("Required for Gemini services. Keys are stored in Keychain.")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -169,6 +221,24 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
                     .onAppear { tempClaudeKey = KeychainHelper.load(key: "Claude_API_Key") ?? "" }
 
+                HStack {
+                    Button(action: { testClaudeKey() }) {
+                        HStack(spacing: 4) {
+                            if claudeKeyStatus == .testing {
+                                ProgressView().scaleEffect(0.6)
+                            }
+                            Text(claudeKeyStatus == .valid ? "Valid" : claudeKeyStatus == .invalid ? "Invalid" : "Test")
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .foregroundColor(claudeKeyStatus == .valid ? .green : claudeKeyStatus == .invalid ? .red : nil)
+                    .disabled(tempClaudeKey.isEmpty || claudeKeyStatus == .testing)
+
+                    Spacer()
+                }
+
                 Text("Required for Claude AI service. Keys are stored in Keychain.")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -178,6 +248,24 @@ struct SettingsView: View {
                 SecureField("Enter OpenAI API key...", text: $tempOpenAIKey)
                     .textFieldStyle(.roundedBorder)
                     .onAppear { tempOpenAIKey = KeychainHelper.load(key: "OpenAI_API_Key") ?? "" }
+
+                HStack {
+                    Button(action: { testOpenAIKey() }) {
+                        HStack(spacing: 4) {
+                            if openaiKeyStatus == .testing {
+                                ProgressView().scaleEffect(0.6)
+                            }
+                            Text(openaiKeyStatus == .valid ? "Valid" : openaiKeyStatus == .invalid ? "Invalid" : "Test")
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .foregroundColor(openaiKeyStatus == .valid ? .green : openaiKeyStatus == .invalid ? .red : nil)
+                    .disabled(tempOpenAIKey.isEmpty || openaiKeyStatus == .testing)
+
+                    Spacer()
+                }
 
                 Text("Required for OpenAI (GPT) service. Keys are stored in Keychain.")
                     .font(.caption)
@@ -381,5 +469,113 @@ struct SettingsView: View {
         )
         showDiagnosticsCopied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showDiagnosticsCopied = false }
+    }
+
+    // MARK: - Maintenance Actions
+
+    private func reindexSearch() {
+        Task {
+            let descriptor = FetchDescriptor<Item>()
+            guard let items = try? modelContext.fetch(descriptor) else { return }
+
+            let documents = items.compactMap { item -> (UUID, String)? in
+                guard let vid = item.vectorId else { return nil }
+                let text = (item.title != nil && !item.title!.isEmpty) ? "\(item.title!)\n\n\(item.content)" : item.content
+                return (vid, text)
+            }
+
+            if !documents.isEmpty {
+                await container.vectorSearch.addDocuments(items: documents)
+            }
+
+            await MainActor.run {
+                showReindexSuccess = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { showReindexSuccess = false }
+            }
+        }
+    }
+
+    private func clearAllHistory() {
+        guard let repository = container.repository else { return }
+
+        Task {
+            let descriptor = FetchDescriptor<Item>()
+            guard let items = try? modelContext.fetch(descriptor) else { return }
+
+            for item in items {
+                try? await repository.deleteItem(item)
+            }
+        }
+    }
+
+    // MARK: - API Key Validation
+
+    private enum KeyValidationStatus {
+        case untested, testing, valid, invalid
+    }
+
+    private func testGeminiKey() {
+        geminiKeyStatus = .testing
+        Task {
+            let valid = await testAPIEndpoint(
+                url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(tempGeminiKey)")!
+            )
+            geminiKeyStatus = valid ? .valid : .invalid
+        }
+    }
+
+    private func testClaudeKey() {
+        claudeKeyStatus = .testing
+        Task {
+            var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+            request.httpMethod = "POST"
+            request.setValue(tempClaudeKey, forHTTPHeaderField: "x-api-key")
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: [
+                "model": "claude-sonnet-4-5-20250929",
+                "max_tokens": 1,
+                "messages": [["role": "user", "content": "hi"]]
+            ])
+            let valid = await testAPIRequest(request: request)
+            claudeKeyStatus = valid ? .valid : .invalid
+        }
+    }
+
+    private func testOpenAIKey() {
+        openaiKeyStatus = .testing
+        Task {
+            let valid = await testAPIEndpoint(
+                url: URL(string: "https://api.openai.com/v1/models")!,
+                headers: ["Authorization": "Bearer \(tempOpenAIKey)"]
+            )
+            openaiKeyStatus = valid ? .valid : .invalid
+        }
+    }
+
+    private func testAPIEndpoint(url: URL, headers: [String: String] = [:]) async -> Bool {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            return (response as? HTTPURLResponse)?.statusCode == 200
+        } catch {
+            return false
+        }
+    }
+
+    private func testAPIRequest(request: URLRequest) async -> Bool {
+        var req = request
+        req.timeoutInterval = 10
+        do {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            return code == 200
+        } catch {
+            return false
+        }
     }
 }

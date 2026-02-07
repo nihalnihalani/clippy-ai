@@ -28,6 +28,7 @@ struct ContentView: View {
     @State private var showSettings: Bool = false
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
     @State private var showOnboarding: Bool = false
+    @State private var showDatabaseResetAlert: Bool = false
 
     // AI Processing State
     @State private var thinkingStartTime: Date? // Track when thinking state started
@@ -41,28 +42,41 @@ struct ContentView: View {
                 selection: $selectedCategory,
                 selectedAIService: $container.selectedAIServiceType,
                 clippyController: clippyController,
-                showSettings: $showSettings
+                showSettings: $showSettings,
+                searchText: $searchText
             )
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
         } content: {
             ClipboardListView(
                 selectedItems: $selectedItems,
                 category: selectedCategory ?? .allItems,
                 searchText: $searchText
             )
+            .navigationSplitViewColumnWidth(min: 300, ideal: 400, max: 520)
         } detail: {
             // Show first selected item in detail view
             if let firstSelectedId = selectedItems.first,
                let item = allItems.first(where: { $0.id == firstSelectedId }) {
                 ClipboardDetailView(item: item)
             } else {
-                VStack(spacing: 16) {
+                VStack(spacing: 20) {
                     Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 48))
-                        .foregroundColor(.secondary.opacity(0.5))
-                    Text("Select an item to view details")
-                        .font(.title3)
+                        .font(.system(size: 40))
+                        .foregroundColor(.secondary.opacity(0.4))
+
+                    Text("\(allItems.count) items in your clipboard")
+                        .font(.title3.weight(.medium))
                         .foregroundColor(.secondary)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        KeyboardShortcutHint(keys: "⇧⌘V", description: "Search overlay")
+                        KeyboardShortcutHint(keys: "⌥X", description: "Ask AI")
+                        KeyboardShortcutHint(keys: "⌥V", description: "OCR capture")
+                        KeyboardShortcutHint(keys: "⌥␣", description: "Voice input")
+                    }
+                    .padding(.top, 4)
                 }
+                .padding(32)
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -97,12 +111,21 @@ struct ContentView: View {
             if !hasCompletedOnboarding {
                 showOnboarding = true
             }
+            if UserDefaults.standard.bool(forKey: "didResetDatabase") {
+                showDatabaseResetAlert = true
+                UserDefaults.standard.removeObject(forKey: "didResetDatabase")
+            }
         }
         .sheet(isPresented: $showOnboarding) {
             OnboardingView(selectedAIService: $container.selectedAIServiceType) {
                 hasCompletedOnboarding = true
                 showOnboarding = false
             }
+        }
+        .alert("Database Reset", isPresented: $showDatabaseResetAlert) {
+            Button("OK") { }
+        } message: {
+            Text("Your clipboard history was reset due to a database update. This is a one-time occurrence and your new items will be saved normally.")
         }
     }
     
@@ -260,7 +283,9 @@ struct ContentView: View {
                     tags: [],
                     vectorId: nil,
                     imagePath: nil,
-                    title: nil
+                    title: nil,
+                    isSensitive: false,
+                    expiresAt: nil
                 )
                 Logger.ui.info("Vision content saved via Repository")
             } catch {
@@ -336,7 +361,7 @@ struct ContentView: View {
     private func handleAIResponse(answer: String?, imageIndex: Int?, contextItems: [Item], errorMessage: String? = nil) {
         // Calculate how long we've been in thinking state
         let elapsed = Date().timeIntervalSince(thinkingStartTime ?? Date())
-        let remainingDelay = max(0, 3.0 - elapsed) // Minimum 3 seconds of thinking
+        let remainingDelay = max(0, 0.5 - elapsed) // Minimum 0.5 seconds of thinking
         
         Logger.ui.info("AI response received. Elapsed: \(elapsed, privacy: .public)s, Remaining delay: \(remainingDelay, privacy: .public)s")
         

@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct StatusBarMenu: View {
-    @Query(sort: \Item.timestamp, order: .reverse, fetchLimit: 10, animation: .default)
+    @Query(sort: \Item.timestamp, order: .reverse, animation: .default)
     private var recentItems: [Item]
 
     @EnvironmentObject var container: AppDependencyContainer
@@ -35,7 +35,7 @@ struct StatusBarMenu: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(Array(recentItems.enumerated()), id: \.element.persistentModelID) { index, item in
+                        ForEach(Array(recentItems.prefix(10).enumerated()), id: \.element.persistentModelID) { index, item in
                             StatusBarItemRow(
                                 item: item,
                                 shortcutNumber: index + 1,
@@ -201,11 +201,17 @@ struct StatusBarItemRow: View {
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.isSensitive ? "Sensitive item" : displayText), from \(item.appName ?? "unknown")")
+        .accessibilityHint("Tap to copy this item to clipboard")
     }
 
     private var displayText: String {
         if isCopied {
             return "Copied!"
+        }
+        if item.isSensitive {
+            return String(repeating: "\u{2022}", count: min(item.content.count, 20))
         }
         if item.contentType == "image" {
             return "[Image]"
@@ -215,6 +221,7 @@ struct StatusBarItemRow: View {
     }
 
     private var iconName: String {
+        if item.isSensitive { return "lock.fill" }
         switch item.contentType {
         case "image": return "photo"
         case "code": return "chevron.left.forwardslash.chevron.right"
@@ -225,6 +232,9 @@ struct StatusBarItemRow: View {
     private var iconGradient: LinearGradient {
         if isCopied {
             return LinearGradient(colors: [.green, .mint], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        if item.isSensitive {
+            return LinearGradient(colors: [.orange, .red], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
         switch item.contentType {
         case "image":

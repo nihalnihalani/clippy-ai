@@ -1,4 +1,5 @@
 import os
+import Foundation
 
 extension Logger {
     private static let subsystem = Bundle.main.bundleIdentifier ?? "com.clippy.app"

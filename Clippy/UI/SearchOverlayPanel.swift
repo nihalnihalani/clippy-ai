@@ -159,6 +159,8 @@ class SearchOverlayController: ObservableObject {
     }
 
     deinit {
-        removeClickMonitor()
+        if let monitor = clickMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 }

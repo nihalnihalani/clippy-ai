@@ -13,137 +13,152 @@ struct ClipboardListView: View {
     @State private var searchResults: [Item] = []
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>?
-    @State private var lastClickedItemId: PersistentIdentifier? // For shift-click range selection
     @State private var copiedItemId: PersistentIdentifier?
     @State private var keyboardIndex: Int = 0
     
     var body: some View {
         VStack(spacing: 0) {
-            // "World Class" Glass Search Bar
-            // Search bar moved to toolbar
-            
-            List(selection: $selectedItems) {
-                if searchText.isEmpty {
-                    // Normal List View
-                    ForEach(filteredItems) { item in
-                        clipboardRow(for: item)
-                    }
-                } else {
-                    // Search Results View
-                    if isSearching {
-                        HStack {
-                            Spacer()
-                            ProgressView("Searching...")
-                                .scaleEffect(0.8)
-                            Spacer()
-                        }
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                    } else if searchResults.isEmpty {
-                        ContentUnavailableView.search(text: searchText)
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    } else {
-                        ForEach(searchResults) { item in
-                            clipboardRow(for: item)
-                        }
-                    }
-                }
-            }
-            .listStyle(.plain)
-            .navigationTitle(category?.rawValue ?? "Clipboard")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    GlassSearchBar(searchText: $searchText)
-                        .frame(width: 250) // Slightly smaller for right alignment
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
-            .onKeyPress(.escape) {
-                if !selectedItems.isEmpty {
-                    selectedItems.removeAll()
-                    return .handled
-                }
-                return .ignored
-            }
-            .onKeyPress(.upArrow) {
-                let items = currentItems
-                if keyboardIndex > 0 {
-                    keyboardIndex -= 1
-                    selectItemAtIndex(keyboardIndex, in: items)
-                }
-                return .handled
-            }
-            .onKeyPress(.downArrow) {
-                let items = currentItems
-                if keyboardIndex < items.count - 1 {
-                    keyboardIndex += 1
-                    selectItemAtIndex(keyboardIndex, in: items)
-                }
-                return .handled
-            }
-            .onKeyPress(.return) {
-                let items = currentItems
-                if keyboardIndex >= 0, keyboardIndex < items.count {
-                    copyToClipboard(items[keyboardIndex])
-                }
-                return .handled
-            }
-            .onKeyPress(.delete, modifiers: .command) {
-                let items = currentItems
-                if keyboardIndex >= 0, keyboardIndex < items.count {
-                    deleteItem(items[keyboardIndex])
-                }
-                return .handled
-            }
-            .onKeyPress("d", modifiers: .command) {
-                let items = currentItems
-                if keyboardIndex >= 0, keyboardIndex < items.count {
-                    items[keyboardIndex].isFavorite.toggle()
-                }
-                return .handled
-            }
+            itemList
         }
         .onChange(of: searchText) { _, newValue in
-            // Cancel previous task
-            searchTask?.cancel()
-            
-            guard !newValue.isEmpty else {
-                searchResults = []
-                isSearching = false
-                return
+            handleSearchChange(newValue)
+        }
+    }
+
+    @ViewBuilder
+    private var itemList: some View {
+        List(selection: $selectedItems) {
+            listContent
+        }
+        .listStyle(.plain)
+        .navigationTitle(category?.rawValue ?? "Clipboard")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                GlassSearchBar(searchText: $searchText)
+                    .frame(width: 320)
             }
-            
-            isSearching = true
-            
-            searchTask = Task {
-                // Debounce
-                try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
-                
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
+        .onKeyPress(.escape) { handleEscapeKey() }
+        .onKeyPress(.upArrow) { handleUpArrowKey() }
+        .onKeyPress(.downArrow) { handleDownArrowKey() }
+        .onKeyPress(.return) { handleReturnKey() }
+        .onKeyPress(.delete, phases: .down) { keyPress in
+            guard keyPress.modifiers.contains(.command) else { return .ignored }
+            return handleDeleteKey()
+        }
+        .onKeyPress("d", phases: .down) { keyPress in
+            guard keyPress.modifiers.contains(.command) else { return .ignored }
+            return handleFavoriteKey()
+        }
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        if searchText.isEmpty {
+            ForEach(filteredItems) { item in
+                clipboardRow(for: item)
+            }
+        } else if isSearching {
+            HStack {
+                Spacer()
+                ProgressView("Searching...")
+                    .scaleEffect(0.8)
+                Spacer()
+            }
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+        } else if searchResults.isEmpty {
+            ContentUnavailableView.search(text: searchText)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        } else {
+            ForEach(searchResults) { item in
+                clipboardRow(for: item)
+            }
+        }
+    }
+
+    // MARK: - Key Press Handlers
+
+    private func handleEscapeKey() -> KeyPress.Result {
+        if !selectedItems.isEmpty {
+            selectedItems.removeAll()
+            return .handled
+        }
+        return .ignored
+    }
+
+    private func handleUpArrowKey() -> KeyPress.Result {
+        let items = currentItems
+        if keyboardIndex > 0 {
+            keyboardIndex -= 1
+            selectItemAtIndex(keyboardIndex, in: items)
+        }
+        return .handled
+    }
+
+    private func handleDownArrowKey() -> KeyPress.Result {
+        let items = currentItems
+        if keyboardIndex < items.count - 1 {
+            keyboardIndex += 1
+            selectItemAtIndex(keyboardIndex, in: items)
+        }
+        return .handled
+    }
+
+    private func handleReturnKey() -> KeyPress.Result {
+        let items = currentItems
+        if keyboardIndex >= 0, keyboardIndex < items.count {
+            copyToClipboard(items[keyboardIndex])
+        }
+        return .handled
+    }
+
+    private func handleDeleteKey() -> KeyPress.Result {
+        let items = currentItems
+        if keyboardIndex >= 0, keyboardIndex < items.count {
+            deleteItem(items[keyboardIndex])
+        }
+        return .handled
+    }
+
+    private func handleFavoriteKey() -> KeyPress.Result {
+        let items = currentItems
+        if keyboardIndex >= 0, keyboardIndex < items.count {
+            items[keyboardIndex].isFavorite.toggle()
+        }
+        return .handled
+    }
+
+    private func handleSearchChange(_ newValue: String) {
+        searchTask?.cancel()
+
+        guard !newValue.isEmpty else {
+            searchResults = []
+            isSearching = false
+            return
+        }
+
+        isSearching = true
+
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if Task.isCancelled { return }
+
+            let results = await container.vectorSearch.search(query: newValue, limit: 20)
+            if Task.isCancelled { return }
+
+            let ids = results.map { $0.0 }
+
+            await MainActor.run {
                 if Task.isCancelled { return }
-                
-                // 1. Perform semantic search
-                let results = await container.vectorSearch.search(query: newValue, limit: 20)
-                
-                if Task.isCancelled { return }
-                
-                // 2. Map IDs back to Items
-                let ids = results.map { $0.0 }
-                
-                await MainActor.run {
-                    if Task.isCancelled { return }
-                    
-                    // Efficiently find items in current loaded list
-                    let foundItems = allItems.filter { ids.contains($0.vectorId ?? UUID()) }
-                    
-                    // Sort by the order returned from search (relevance)
-                    self.searchResults = ids.compactMap { id in
-                        foundItems.first(where: { $0.vectorId == id })
-                    }
-                    
-                    self.isSearching = false
+                let foundItems = allItems.filter { ids.contains($0.vectorId ?? UUID()) }
+                self.searchResults = ids.compactMap { id in
+                    foundItems.first(where: { $0.vectorId == id })
                 }
+                self.isSearching = false
             }
         }
     }
@@ -188,6 +203,12 @@ struct ClipboardListView: View {
                     copyToClipboard(item)
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
+                }
+
+                Button {
+                    item.isFavorite.toggle()
+                } label: {
+                    Label(item.isFavorite ? "Unfavorite" : "Favorite", systemImage: item.isFavorite ? "heart.slash" : "heart")
                 }
 
                 Divider()
@@ -271,7 +292,6 @@ struct ClipboardItemRow: View {
     let item: Item
     let isSelected: Bool
     var isCopied: Bool = false
-    @State private var actions: [ClipboardAction] = []
     @State private var isHovering = false
 
     private var isCode: Bool { SidebarView.isCodeContent(item) }
@@ -284,7 +304,7 @@ struct ClipboardItemRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 10) {
             // Icon or image thumbnail
             if item.contentType == "image", let imagePath = item.imagePath {
                 let imageURL = ClipboardService.shared.getImagesDirectory().appendingPathComponent(imagePath)
@@ -292,30 +312,28 @@ struct ClipboardItemRow: View {
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
                     ZStack {
-                        Circle().fill(iconGradient)
+                        Circle().fill(richIconGradient)
                         Image(systemName: "photo")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.white)
                     }
                 }
-                .frame(width: 38, height: 38)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .shadow(color: Color.blue.opacity(0.2), radius: 4, x: 0, y: 2)
+                .frame(width: 26, height: 26)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             } else {
                 ZStack {
                     Circle()
                         .fill(isCopied ? LinearGradient(colors: [.green, .mint], startPoint: .topLeading, endPoint: .bottomTrailing) : richIconGradient)
-                        .frame(width: 38, height: 38)
-                        .shadow(color: (isCopied ? Color.green : richIconColor).opacity(0.3), radius: 4, x: 0, y: 2)
+                        .frame(width: 26, height: 26)
 
                     Image(systemName: isCopied ? "checkmark" : richIconName)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.white)
                 }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                // Title with content-aware font
+            VStack(alignment: .leading, spacing: 4) {
+                // Title with content-aware font — 2-line limit for all types
                 if item.isSensitive {
                     HStack(spacing: 4) {
                         Image(systemName: "lock.fill")
@@ -330,20 +348,31 @@ struct ClipboardItemRow: View {
                         .font(.system(.body, design: .rounded).weight(.medium))
                         .foregroundColor(.green)
                 } else if isCode {
-                    Text(item.title ?? String(item.content.prefix(80)).replacingOccurrences(of: "\n", with: " "))
+                    Text(item.title ?? String(item.content.prefix(120)).replacingOccurrences(of: "\n", with: " "))
                         .font(.system(.body, design: .monospaced).weight(.medium))
                         .foregroundColor(.purple)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 } else if isURL, let domain = urlDomain {
                     Text(domain)
                         .font(.system(.body, design: .rounded).weight(.medium))
                         .foregroundColor(.teal)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 } else {
                     Text(item.title ?? item.content)
                         .font(.system(.body, design: .rounded).weight(.medium))
                         .foregroundColor(.primary)
-                        .lineLimit(item.content.count < 100 ? 3 : 1)
+                        .lineLimit(2)
+                }
+
+                // Content preview (1 line, lighter color) — skip for sensitive/copied/image
+                if !item.isSensitive && !isCopied && item.contentType != "image" {
+                    let preview = item.title != nil ? item.content : ""
+                    if !preview.isEmpty {
+                        Text(preview.replacingOccurrences(of: "\n", with: " "))
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary.opacity(0.8))
+                            .lineLimit(1)
+                    }
                 }
 
                 // Metadata
@@ -357,55 +386,6 @@ struct ClipboardItemRow: View {
                 }
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
-
-                // Tags (minimal)
-                if !item.tags.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(item.tags.prefix(2), id: \.self) { tag in
-                            Text(tag)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.white.opacity(0.15))
-                                .clipShape(Capsule())
-                                .overlay(
-                                    Capsule()
-                                        .stroke(.white.opacity(0.2), lineWidth: 0.5)
-                                )
-                        }
-                        if item.tags.count > 2 {
-                            Text("+\(item.tags.count - 2)")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-
-                // Detected Actions (shown on hover or selection)
-                if !actions.isEmpty && (isHovering || isSelected) {
-                    HStack(spacing: 6) {
-                        ForEach(actions) { action in
-                            Button(action: { action.perform() }) {
-                                HStack(spacing: 3) {
-                                    Image(systemName: action.iconName)
-                                        .font(.system(size: 9))
-                                    Text(action.label)
-                                        .font(.system(size: 9, weight: .medium))
-                                }
-                                .foregroundColor(.accentColor)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(Color.accentColor.opacity(0.12))
-                                .clipShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    .padding(.top, 2)
-                }
             }
 
             Spacer()
@@ -423,14 +403,6 @@ struct ClipboardItemRow: View {
         .onHover { hover in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovering = hover
-            }
-        }
-        .onAppear {
-            if actions.isEmpty && item.contentType == "text" {
-                DispatchQueue.global(qos: .background).async {
-                    let detected = ActionDetector.shared.detectActions(in: item.content)
-                    DispatchQueue.main.async { actions = detected }
-                }
             }
         }
         .accessibilityElement(children: .combine)
@@ -457,17 +429,6 @@ struct ClipboardItemRow: View {
         }
     }
 
-    private var richIconColor: Color {
-        if item.isSensitive { return .orange }
-        if isCode { return .purple }
-        if isURL { return .teal }
-        switch item.contentType {
-        case "image": return .blue
-        case "code": return .purple
-        default: return .blue
-        }
-    }
-
     private var richIconGradient: LinearGradient {
         if item.isSensitive {
             return LinearGradient(colors: [.orange, .red], startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -488,11 +449,6 @@ struct ClipboardItemRow: View {
         }
     }
 
-    // Legacy references for backward compat
-    private var iconName: String { richIconName }
-    private var iconColor: Color { richIconColor }
-    private var iconGradient: LinearGradient { richIconGradient }
-    
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .abbreviated
@@ -525,12 +481,11 @@ struct GlassSearchBar: View {
             }
         }
         .padding(10)
-        .background(Color.white.opacity(0.05))
         .background(.thickMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(.white.opacity(0.3), lineWidth: 1)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
         )
         // .padding(16) removed for toolbar usage
     }
@@ -543,18 +498,16 @@ struct ClipboardItemRowStyle: ViewModifier {
     
     func body(content: Content) -> some View {
         content
-            .padding(14)
+            .padding(8)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isSelected ? AnyShapeStyle(Color.accentColor.opacity(0.1)) : AnyShapeStyle(isHovering ? .regularMaterial : .thinMaterial))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.1) : (isHovering ? Color.primary.opacity(0.06) : Color.clear))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(.white.opacity(isSelected ? 0.5 : 0.1), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.primary.opacity(isSelected ? 0.15 : 0.04), lineWidth: 1)
             )
-            // .scaleEffect removed per user request
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovering)
-            .shadow(color: Color.black.opacity(isHovering ? 0.1 : 0.05), radius: isHovering ? 8 : 2, x: 0, y: isHovering ? 4 : 1)
+            .animation(.easeInOut(duration: 0.15), value: isHovering)
     }
 }
 

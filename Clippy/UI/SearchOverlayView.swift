@@ -6,13 +6,14 @@ struct SearchOverlayView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var container: AppDependencyContainer
 
-    @Query(sort: \Item.timestamp, order: .reverse, fetchLimit: 100)
+    @Query(sort: \Item.timestamp, order: .reverse)
     private var allItems: [Item]
 
     @State private var searchText = ""
     @State private var selectedIndex = 0
     @State private var semanticResults: [PersistentIdentifier] = []
     @State private var searchTask: Task<Void, Never>?
+    @State private var isSemanticSearching = false
     @FocusState private var isSearchFieldFocused: Bool
 
     let onDismiss: () -> Void
@@ -54,6 +55,8 @@ struct SearchOverlayView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 20, weight: .regular, design: .rounded))
                     .focused($isSearchFieldFocused)
+                    .accessibilityLabel("Search clipboard history")
+                    .accessibilityHint("Type to search your clipboard items")
                     .onSubmit {
                         pasteSelectedItem()
                     }
@@ -72,6 +75,18 @@ struct SearchOverlayView: View {
 
             Divider()
                 .padding(.horizontal, 16)
+
+            if isSemanticSearching {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                    Text("Searching semantically...")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 4)
+            }
 
             // Results
             if displayItems.isEmpty && !searchText.isEmpty {
@@ -119,6 +134,7 @@ struct SearchOverlayView: View {
                 OverlayKeyHint(keys: ["Return"], action: "Paste")
                 OverlayKeyHint(keys: ["\u{2191}\u{2193}"], action: "Navigate")
                 OverlayKeyHint(keys: ["Esc"], action: "Close")
+                OverlayKeyHint(keys: ["1-7"], action: "Quick select")
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
@@ -153,6 +169,14 @@ struct SearchOverlayView: View {
             onDismiss()
             return .handled
         }
+        .onKeyPress(characters: CharacterSet(charactersIn: "1234567")) { press in
+            guard let digit = press.characters.first?.wholeNumberValue,
+                  digit >= 1, digit <= displayItems.count else {
+                return .ignored
+            }
+            onPaste(displayItems[digit - 1])
+            return .handled
+        }
     }
 
     private func pasteSelectedItem() {
@@ -167,6 +191,7 @@ struct SearchOverlayView: View {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else {
             semanticResults = []
+            isSemanticSearching = false
             return
         }
 
@@ -174,6 +199,8 @@ struct SearchOverlayView: View {
             // Debounce 300ms
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
+
+            await MainActor.run { isSemanticSearching = true }
 
             let vectorResults = await container.vectorSearch.search(query: trimmed, limit: 7)
             guard !Task.isCancelled else { return }
@@ -187,6 +214,7 @@ struct SearchOverlayView: View {
 
             await MainActor.run {
                 semanticResults = matchedIds
+                isSemanticSearching = false
             }
         }
     }
@@ -274,6 +302,9 @@ struct SearchResultRow: View {
                 .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
         )
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.isSensitive ? "Sensitive content" : displayText), from \(item.appName ?? "unknown app")")
+        .accessibilityHint("Tap to paste this item")
     }
 
     private var displayText: String {
