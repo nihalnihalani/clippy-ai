@@ -8,66 +8,64 @@ struct ClippyMascotView: View {
     @State private var isDragging = false
 
     private let mascotSize: CGFloat = 64
-    private let padding: CGFloat = 16
 
     var body: some View {
-        GeometryReader { geo in
-            if mascotState.isVisible {
-                MascotGifPlayer(gifName: mascotState.currentAnimation.gifFileName)
-                    .frame(width: mascotSize, height: mascotSize)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
-                    .scaleEffect(isDragging ? 1.08 : 1.0)
-                    .position(mascotPosition(in: geo.size))
-                    .offset(dragOffset)
-                    .gesture(dragGesture(in: geo.size))
-                    .onTapGesture(count: 2) {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
-                            mascotState.corner = .bottomRight
-                        }
-                    }
-                    .contextMenu {
-                        Button("Hide Mascot") { mascotState.toggleVisibility() }
-                        Button("Reset Position") {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
-                                mascotState.corner = .bottomRight
-                            }
-                        }
-                        Divider()
-                        Menu("Move to Corner") {
-                            Button("Top Left") { mascotState.corner = .topLeft }
-                            Button("Top Right") { mascotState.corner = .topRight }
-                            Button("Bottom Left") { mascotState.corner = .bottomLeft }
-                            Button("Bottom Right") { mascotState.corner = .bottomRight }
-                        }
-                    }
-                    .accessibilityLabel("Clippy mascot")
-                    .accessibilityHint("Double-click to reset position. Right-click for options.")
-                    .transition(.scale.combined(with: .opacity))
-                    .animation(.spring(response: 0.35, dampingFraction: 0.65), value: mascotState.corner)
-            }
+        if mascotState.isVisible {
+            mascotBody
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: cornerAlignment)
+                .padding(12)
+                .animation(.spring(response: 0.35, dampingFraction: 0.65), value: mascotState.corner)
+                .allowsHitTesting(true)
         }
     }
 
-    // MARK: - Position
+    private var mascotBody: some View {
+        MascotGifPlayer(gifName: mascotState.currentAnimation.gifFileName)
+            .frame(width: mascotSize, height: mascotSize)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+            .scaleEffect(isDragging ? 1.08 : 1.0)
+            .offset(dragOffset)
+            .gesture(dragGesture)
+            .onTapGesture(count: 2) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
+                    mascotState.corner = .bottomRight
+                }
+            }
+            .contextMenu {
+                Button("Hide Mascot") { mascotState.toggleVisibility() }
+                Button("Reset Position") {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
+                        mascotState.corner = .bottomRight
+                    }
+                }
+                Divider()
+                Menu("Move to Corner") {
+                    Button("Top Left") { mascotState.corner = .topLeft }
+                    Button("Top Right") { mascotState.corner = .topRight }
+                    Button("Bottom Left") { mascotState.corner = .bottomLeft }
+                    Button("Bottom Right") { mascotState.corner = .bottomRight }
+                }
+            }
+            .accessibilityLabel("Clippy mascot")
+            .accessibilityHint("Double-click to reset position. Right-click for options.")
+            .transition(.scale.combined(with: .opacity))
+    }
 
-    private func mascotPosition(in size: CGSize) -> CGPoint {
-        let halfSize = mascotSize / 2
+    // MARK: - Corner Alignment
+
+    private var cornerAlignment: Alignment {
         switch mascotState.corner {
-        case .bottomRight:
-            return CGPoint(x: size.width - halfSize - padding, y: size.height - halfSize - padding)
-        case .bottomLeft:
-            return CGPoint(x: halfSize + padding, y: size.height - halfSize - padding)
-        case .topRight:
-            return CGPoint(x: size.width - halfSize - padding, y: halfSize + padding)
-        case .topLeft:
-            return CGPoint(x: halfSize + padding, y: halfSize + padding)
+        case .bottomRight: return .bottomTrailing
+        case .bottomLeft:  return .bottomLeading
+        case .topRight:    return .topTrailing
+        case .topLeft:     return .topLeading
         }
     }
 
     // MARK: - Drag Gesture (snap to nearest corner on release)
 
-    private func dragGesture(in size: CGSize) -> some Gesture {
+    private var dragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
                 isDragging = true
@@ -75,18 +73,37 @@ struct ClippyMascotView: View {
             }
             .onEnded { value in
                 isDragging = false
-                let currentPos = mascotPosition(in: size)
-                let finalX = currentPos.x + value.translation.width
-                let finalY = currentPos.y + value.translation.height
+                let dx = value.translation.width
+                let dy = value.translation.height
 
-                // Snap to nearest corner
-                let midX = size.width / 2
-                let midY = size.height / 2
-                let newCorner: MascotCorner
-                if finalX < midX {
-                    newCorner = finalY < midY ? .topLeft : .bottomLeft
-                } else {
-                    newCorner = finalY < midY ? .topRight : .bottomRight
+                // Determine new corner from drag direction
+                var newCorner = mascotState.corner
+                let threshold: CGFloat = 50
+
+                if abs(dx) > threshold || abs(dy) > threshold {
+                    let goingRight = dx > threshold
+                    let goingLeft = dx < -threshold
+                    let goingDown = dy > threshold
+                    let goingUp = dy < -threshold
+
+                    switch mascotState.corner {
+                    case .bottomRight:
+                        if goingLeft { newCorner = .bottomLeft }
+                        if goingUp { newCorner = .topRight }
+                        if goingLeft && goingUp { newCorner = .topLeft }
+                    case .bottomLeft:
+                        if goingRight { newCorner = .bottomRight }
+                        if goingUp { newCorner = .topLeft }
+                        if goingRight && goingUp { newCorner = .topRight }
+                    case .topRight:
+                        if goingLeft { newCorner = .topLeft }
+                        if goingDown { newCorner = .bottomRight }
+                        if goingLeft && goingDown { newCorner = .bottomLeft }
+                    case .topLeft:
+                        if goingRight { newCorner = .topRight }
+                        if goingDown { newCorner = .bottomLeft }
+                        if goingRight && goingDown { newCorner = .bottomRight }
+                    }
                 }
 
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {

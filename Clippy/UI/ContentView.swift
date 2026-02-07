@@ -37,7 +37,6 @@ struct ContentView: View {
     @Query(sort: \Item.timestamp, order: .reverse) private var allItems: [Item]
 
     var body: some View {
-        ZStack {
         NavigationSplitView {
             SidebarView(
                 selection: $selectedCategory,
@@ -80,10 +79,9 @@ struct ContentView: View {
                 .padding(32)
             }
         }
-            // Mascot overlay — always visible in chosen corner
+        .overlay {
             ClippyMascotView(mascotState: container.mascotState)
-                .allowsHitTesting(true)
-        } // end ZStack
+        }
         .onChange(of: showSettings) { _, isOpen in
             if isOpen { container.mascotState.onSettingsOpened() }
         }
