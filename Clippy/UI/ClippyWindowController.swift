@@ -406,6 +406,7 @@ class ClippyWindowController: ObservableObject {
     }
     
     deinit {
+        NotificationCenter.default.removeObserver(self)
         stopEscapeKeyMonitoring()
         window?.close()
     }

@@ -267,8 +267,6 @@ struct ClipboardListView: View {
 
 // MARK: - Clipboard Item Row
 
-// MARK: - Clipboard Item Row
-
 struct ClipboardItemRow: View {
     let item: Item
     let isSelected: Bool

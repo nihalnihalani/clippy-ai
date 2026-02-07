@@ -84,6 +84,7 @@ struct DataExporter {
                     isFavorite: backupItem.isFavorite
                 )
                 item.tags = backupItem.tags
+                item.vectorId = UUID()
                 context.insert(item)
                 imported += 1
             }

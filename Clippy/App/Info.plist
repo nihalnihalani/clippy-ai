@@ -30,6 +30,17 @@
 	<string>Clippy requires screen recording access to capture screen content for OCR text extraction when you press Option+V.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2025 Barathwaj Anandan. All rights reserved.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>clippy</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
 
