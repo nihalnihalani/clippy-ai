@@ -91,14 +91,6 @@ class ClippyMascotState: ObservableObject {
     @Published var currentMessage: String?
     @Published var showSpinner: Bool = false
 
-    // MARK: - Free Drag Position (percentage of container, 0.0–1.0)
-    @Published var positionX: CGFloat {
-        didSet { UserDefaults.standard.set(Double(positionX), forKey: "MascotPositionX") }
-    }
-    @Published var positionY: CGFloat {
-        didSet { UserDefaults.standard.set(Double(positionY), forKey: "MascotPositionY") }
-    }
-
     // MARK: - Idle cycling
     private var idleTimer: Timer?
     private let idleAnimations: [MascotAnimation] = [.whimsical, .music, .reading, .flying]
@@ -120,12 +112,6 @@ class ClippyMascotState: ObservableObject {
 
     init() {
         self.isVisible = UserDefaults.standard.object(forKey: "MascotVisible") as? Bool ?? true
-
-        let x = UserDefaults.standard.double(forKey: "MascotPositionX")
-        let y = UserDefaults.standard.double(forKey: "MascotPositionY")
-        // Default to top-right area
-        self.positionX = x == 0 ? 0.92 : CGFloat(x)
-        self.positionY = y == 0 ? 0.08 : CGFloat(y)
     }
 
     // MARK: - Wiring (called from AppDependencyContainer.inject)
@@ -332,9 +318,4 @@ class ClippyMascotState: ObservableObject {
         }
     }
 
-    /// Reset position to default (top-right).
-    func resetPosition() {
-        positionX = 0.92
-        positionY = 0.08
-    }
 }

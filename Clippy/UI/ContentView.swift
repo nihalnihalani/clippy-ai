@@ -77,9 +77,6 @@ struct ContentView: View {
                 .padding(32)
             }
         }
-        .overlay {
-            ClippyMascotView(mascotState: container.mascotState)
-        }
         .onChange(of: showSettings) { _, isOpen in
             if isOpen { container.mascotState.onSettingsOpened() }
         }

@@ -15,6 +15,7 @@ class AppDependencyContainer: ObservableObject {
 
     // Mascot
     let mascotState: ClippyMascotState
+    let floatingMascotController: FloatingMascotController
 
     // AI Services
     let localAIService: LocalAIService
@@ -59,6 +60,7 @@ class AppDependencyContainer: ObservableObject {
         self.visionParser = VisionScreenParser()
         self.hotkeyManager = HotkeyManager()
         self.mascotState = ClippyMascotState()
+        self.floatingMascotController = FloatingMascotController(mascotState: mascotState)
         self.searchOverlayController = SearchOverlayController()
         self.audioRecorder = AudioRecorder()
         self.localAIService = LocalAIService()
