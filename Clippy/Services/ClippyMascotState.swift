@@ -4,7 +4,7 @@ import os
 
 // MARK: - Mascot Animation
 
-/// Maps the 24 clippy_gif assets to semantic app states.
+/// Maps the clippy_gif assets to semantic app states.
 /// Raw values are the exact GIF filenames (case-sensitive) without extension.
 enum MascotAnimation: String, CaseIterable {
     // Greetings / transitions
@@ -45,11 +45,36 @@ enum MascotAnimation: String, CaseIterable {
     var gifFileName: String { rawValue }
 }
 
-// MARK: - Mascot Corner
+// MARK: - Mascot Activity State
 
-/// Which corner of the window the mascot snaps to.
-enum MascotCorner: String {
-    case bottomRight, bottomLeft, topRight, topLeft
+/// Semantic activity states that bridge the old ClippyAnimationState API.
+/// ContentView calls `mascotState.setState(.thinking, message: "...")`.
+enum MascotActivityState {
+    case idle
+    case writing
+    case thinking
+    case done
+    case error
+
+    var animation: MascotAnimation {
+        switch self {
+        case .idle:     return .whimsical
+        case .writing:  return .reading
+        case .thinking: return .thinking
+        case .done:     return .complete
+        case .error:    return .angry
+        }
+    }
+
+    var defaultMessage: String {
+        switch self {
+        case .idle:     return "Listening..."
+        case .writing:  return "Got it..."
+        case .thinking: return "Thinking..."
+        case .done:     return "Done!"
+        case .error:    return "Oops! Something went wrong"
+        }
+    }
 }
 
 // MARK: - ClippyMascotState
@@ -61,8 +86,17 @@ class ClippyMascotState: ObservableObject {
     @Published var isVisible: Bool {
         didSet { UserDefaults.standard.set(isVisible, forKey: "MascotVisible") }
     }
-    @Published var corner: MascotCorner = .topRight {
-        didSet { UserDefaults.standard.set(corner.rawValue, forKey: "MascotCorner") }
+
+    // MARK: - Message Bubble
+    @Published var currentMessage: String?
+    @Published var showSpinner: Bool = false
+
+    // MARK: - Free Drag Position (percentage of container, 0.0–1.0)
+    @Published var positionX: CGFloat {
+        didSet { UserDefaults.standard.set(Double(positionX), forKey: "MascotPositionX") }
+    }
+    @Published var positionY: CGFloat {
+        didSet { UserDefaults.standard.set(Double(positionY), forKey: "MascotPositionY") }
     }
 
     // MARK: - Idle cycling
@@ -73,10 +107,11 @@ class ClippyMascotState: ObservableObject {
 
     // Deep idle
     private var lastActivityDate = Date()
-    private let deepIdleThreshold: TimeInterval = 300 // 5 minutes
+    private let deepIdleThreshold: TimeInterval = 300
 
-    // Transient animation return
+    // Timers
     private var transientWorkItem: DispatchWorkItem?
+    private var messageDismissWorkItem: DispatchWorkItem?
 
     // MARK: - Combine
     private var cancellables = Set<AnyCancellable>()
@@ -85,35 +120,81 @@ class ClippyMascotState: ObservableObject {
 
     init() {
         self.isVisible = UserDefaults.standard.object(forKey: "MascotVisible") as? Bool ?? true
-        if let saved = UserDefaults.standard.string(forKey: "MascotCorner"),
-           let c = MascotCorner(rawValue: saved) {
-            self.corner = c
-        }
+
+        let x = UserDefaults.standard.double(forKey: "MascotPositionX")
+        let y = UserDefaults.standard.double(forKey: "MascotPositionY")
+        // Default to top-right area
+        self.positionX = x == 0 ? 0.92 : CGFloat(x)
+        self.positionY = y == 0 ? 0.08 : CGFloat(y)
     }
 
     // MARK: - Wiring (called from AppDependencyContainer.inject)
 
     func wire(clipboardMonitor: ClipboardMonitor, queryOrchestrator: QueryOrchestrator) {
-        // Observe clipboard changes
         clipboardMonitor.$clipboardContent
             .dropFirst()
             .sink { [weak self] _ in self?.onClipboardChanged() }
             .store(in: &cancellables)
 
-        // Observe AI processing
         queryOrchestrator.$isProcessing
             .removeDuplicates()
             .sink { [weak self] processing in
                 if processing {
                     self?.onAIProcessingStarted()
-                } else {
-                    self?.onAIProcessingCompleted()
                 }
+                // Don't auto-handle completion here — ContentView's setState(.done) handles it
             }
             .store(in: &cancellables)
 
-        // Launch greeting then start idle cycling
         playAnimation(.hi, duration: 3.0, thenResume: true)
+    }
+
+    // MARK: - setState (replaces ClippyWindowController.setState)
+
+    /// Bridge method replacing ClippyWindowController.setState(_:message:).
+    /// Sets the mascot animation and displays an optional message bubble.
+    func setState(_ state: MascotActivityState, message: String? = nil) {
+        cancelTransient()
+        stopIdleCycling()
+        recordActivity()
+
+        currentAnimation = state.animation
+        currentMessage = message ?? state.defaultMessage
+        showSpinner = (state == .thinking)
+
+        messageDismissWorkItem?.cancel()
+
+        switch state {
+        case .done:
+            let item = DispatchWorkItem { [weak self] in
+                self?.currentMessage = nil
+                self?.showSpinner = false
+                self?.startIdleCycling()
+            }
+            messageDismissWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: item)
+
+        case .error:
+            let item = DispatchWorkItem { [weak self] in
+                self?.currentMessage = nil
+                self?.showSpinner = false
+                self?.startIdleCycling()
+            }
+            messageDismissWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: item)
+
+        case .idle, .writing, .thinking:
+            break // Persistent until next state change
+        }
+    }
+
+    /// Dismiss the current message and return to idle cycling.
+    /// Replaces ClippyWindowController.hide().
+    func dismissMessage() {
+        messageDismissWorkItem?.cancel()
+        currentMessage = nil
+        showSpinner = false
+        startIdleCycling()
     }
 
     // MARK: - Event Handlers
@@ -130,36 +211,26 @@ class ClippyMascotState: ObservableObject {
         currentAnimation = .thinking
     }
 
-    private func onAIProcessingCompleted() {
-        recordActivity()
-        playAnimation(.celebrate, duration: 3.0, thenResume: true)
-    }
-
-    /// Called from ContentView when AI returns an error.
     func onAIError() {
         recordActivity()
         playAnimation(.angry, duration: 3.0, thenResume: true)
     }
 
-    /// Called when user toggles a favorite.
     func onFavoriteToggled(isFavorite: Bool) {
         recordActivity()
         playAnimation(isFavorite ? .love : .dunno, duration: 2.0, thenResume: true)
     }
 
-    /// Called when an item is deleted.
     func onItemDeleted() {
         recordActivity()
         playAnimation(.nauseous, duration: 2.0, thenResume: true)
     }
 
-    /// Called when sensitive content is detected.
     func onSensitiveDetected() {
         recordActivity()
         playAnimation(.secret, duration: 2.5, thenResume: true)
     }
 
-    /// Called when search overlay opens/closes.
     func onSearchOverlay(opened: Bool) {
         recordActivity()
         if opened {
@@ -171,7 +242,6 @@ class ClippyMascotState: ObservableObject {
         }
     }
 
-    /// Called when voice recording is active.
     func onVoiceRecording(active: Bool) {
         recordActivity()
         if active {
@@ -183,13 +253,11 @@ class ClippyMascotState: ObservableObject {
         }
     }
 
-    /// Called when settings sheet is opened.
     func onSettingsOpened() {
         recordActivity()
         playAnimation(.blushing, duration: 2.0, thenResume: true)
     }
 
-    /// Called when OCR/vision capture triggers.
     func onVisionCapture() {
         recordActivity()
         playAnimation(.scared, duration: 2.0, thenResume: true)
@@ -197,7 +265,6 @@ class ClippyMascotState: ObservableObject {
 
     // MARK: - Animation Control
 
-    /// Play an animation for a duration, then optionally resume idle cycling.
     func playAnimation(_ animation: MascotAnimation, duration: TimeInterval, thenResume: Bool) {
         cancelTransient()
         stopIdleCycling()
@@ -217,7 +284,6 @@ class ClippyMascotState: ObservableObject {
     func startIdleCycling() {
         stopIdleCycling()
 
-        // Check for deep idle
         if Date().timeIntervalSince(lastActivityDate) > deepIdleThreshold {
             currentAnimation = .sleep
         } else {
@@ -256,7 +322,6 @@ class ClippyMascotState: ObservableObject {
     func toggleVisibility() {
         if isVisible {
             currentAnimation = .bye
-            // Brief farewell before hiding
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                 self?.isVisible = false
                 self?.stopIdleCycling()
@@ -265,5 +330,11 @@ class ClippyMascotState: ObservableObject {
             isVisible = true
             playAnimation(.hi, duration: 2.0, thenResume: true)
         }
+    }
+
+    /// Reset position to default (top-right).
+    func resetPosition() {
+        positionX = 0.92
+        positionY = 0.08
     }
 }

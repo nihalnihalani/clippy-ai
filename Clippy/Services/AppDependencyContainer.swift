@@ -11,7 +11,6 @@ class AppDependencyContainer: ObservableObject {
     let visionParser: VisionScreenParser
     let hotkeyManager: HotkeyManager
     let textCaptureService: TextCaptureService
-    let clippyController: ClippyWindowController
     let searchOverlayController: SearchOverlayController
 
     // Mascot
@@ -60,7 +59,6 @@ class AppDependencyContainer: ObservableObject {
         self.visionParser = VisionScreenParser()
         self.hotkeyManager = HotkeyManager()
         self.mascotState = ClippyMascotState()
-        self.clippyController = ClippyWindowController()
         self.searchOverlayController = SearchOverlayController()
         self.audioRecorder = AudioRecorder()
         self.localAIService = LocalAIService()
@@ -130,9 +128,6 @@ class AppDependencyContainer: ObservableObject {
         mascotState.wire(clipboardMonitor: clipboardMonitor, queryOrchestrator: queryOrchestrator)
 
         // Inject dependencies into TextCaptureService
-        textCaptureService.setDependencies(
-            clippyController: clippyController,
-            clipboardMonitor: clipboardMonitor
-        )
+        textCaptureService.setDependencies(clipboardMonitor: clipboardMonitor)
     }
 }

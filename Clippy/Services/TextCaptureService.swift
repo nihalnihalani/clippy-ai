@@ -17,12 +17,10 @@ class TextCaptureService: ObservableObject {
     private let undoWindowSeconds: TimeInterval = 30
 
     // Dependencies
-    private var clippyController: ClippyWindowController?
     private var clipboardMonitor: ClipboardMonitor?
-    
+
     // Initialization of dependencies
-    func setDependencies(clippyController: ClippyWindowController, clipboardMonitor: ClipboardMonitor) {
-        self.clippyController = clippyController
+    func setDependencies(clipboardMonitor: ClipboardMonitor) {
         self.clipboardMonitor = clipboardMonitor
     }
     

@@ -30,7 +30,6 @@ enum NavigationCategory: String, Identifiable {
 struct SidebarView: View {
     @Binding var selection: NavigationCategory?
     @Binding var selectedAIService: AIServiceType
-    @ObservedObject var clippyController: ClippyWindowController
     @Binding var showSettings: Bool
     @Binding var searchText: String
     @Environment(\.modelContext) private var modelContext

@@ -56,35 +56,35 @@ final class ModelTests: XCTestCase {
         XCTAssertFalse(areEqual(voice, vision))
     }
 
-    // MARK: - ClippyAnimationState
+    // MARK: - MascotActivityState
 
     func testIdleStateProperties() {
-        let state = ClippyAnimationState.idle
-        XCTAssertEqual(state.gifFileName, "clippy-idle")
+        let state = MascotActivityState.idle
+        XCTAssertEqual(state.animation, .whimsical)
         XCTAssertEqual(state.defaultMessage, "Listening...")
     }
 
     func testWritingStateProperties() {
-        let state = ClippyAnimationState.writing
-        XCTAssertEqual(state.gifFileName, "clippy-writing")
+        let state = MascotActivityState.writing
+        XCTAssertEqual(state.animation, .reading)
         XCTAssertEqual(state.defaultMessage, "Got it...")
     }
 
     func testThinkingStateProperties() {
-        let state = ClippyAnimationState.thinking
-        XCTAssertEqual(state.gifFileName, "clippy-thinking")
+        let state = MascotActivityState.thinking
+        XCTAssertEqual(state.animation, .thinking)
         XCTAssertEqual(state.defaultMessage, "Thinking...")
     }
 
     func testDoneStateProperties() {
-        let state = ClippyAnimationState.done
-        XCTAssertEqual(state.gifFileName, "clippy-done")
+        let state = MascotActivityState.done
+        XCTAssertEqual(state.animation, .complete)
         XCTAssertEqual(state.defaultMessage, "Done!")
     }
 
     func testErrorStateProperties() {
-        let state = ClippyAnimationState.error
-        XCTAssertEqual(state.gifFileName, "clippy-idle") // Uses idle animation for errors
+        let state = MascotActivityState.error
+        XCTAssertEqual(state.animation, .angry)
         XCTAssertEqual(state.defaultMessage, "Oops! Something went wrong")
     }
 

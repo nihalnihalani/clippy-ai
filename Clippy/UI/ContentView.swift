@@ -12,7 +12,6 @@ struct ContentView: View {
     private var hotkeyManager: HotkeyManager { container.hotkeyManager }
     private var visionParser: VisionScreenParser { container.visionParser }
     private var textCaptureService: TextCaptureService { container.textCaptureService }
-    private var clippyController: ClippyWindowController { container.clippyController }
     private var localAIService: LocalAIService { container.localAIService }
     private var geminiService: GeminiService { container.geminiService }
     private var audioRecorder: AudioRecorder { container.audioRecorder }
@@ -41,7 +40,6 @@ struct ContentView: View {
             SidebarView(
                 selection: $selectedCategory,
                 selectedAIService: $container.selectedAIServiceType,
-                clippyController: clippyController,
                 showSettings: $showSettings,
                 searchText: $searchText
             )
@@ -199,7 +197,7 @@ struct ContentView: View {
         // Reset UI state
         if activeInputMode != .none {
             // Only hide if we were actually doing something
-            clippyController.hide()
+            container.mascotState.dismissMessage()
         }
         
         activeInputMode = .none
@@ -213,7 +211,7 @@ struct ContentView: View {
         resetInputState()
         activeInputMode = .visionCapture
 
-        clippyController.setState(.thinking, message: "Capturing screen... 📸")
+        container.mascotState.setState(.thinking, message: "Capturing screen... 📸")
         container.mascotState.onVisionCapture()
 
         Task {
@@ -226,35 +224,35 @@ struct ContentView: View {
                     if !parsedContent.fullText.isEmpty {
                         // If we have image data and Local AI is selected, generate a description
                         if self.container.selectedAIServiceType == .local, let imageData = parsedContent.imageData {
-                            self.clippyController.setState(.thinking, message: "Analyzing image... 🧠")
+                            self.container.mascotState.setState(.thinking, message: "Analyzing image... 🧠")
 
                             Task {
                                 let base64Image = imageData.base64EncodedString()
                                 if let description = await self.localAIService.generateVisionDescription(base64Image: base64Image) {
                                     await MainActor.run {
                                         self.saveVisionContent(description, originalText: parsedContent.fullText)
-                                        self.clippyController.setState(.done, message: "Image analyzed! ✨")
+                                        self.container.mascotState.setState(.done, message: "Image analyzed! ✨")
                                     }
                                 } else {
                                     await MainActor.run {
                                         self.saveVisionContent(parsedContent.fullText)
-                                        self.clippyController.setState(.done, message: "Saved text (Vision failed) ⚠️")
+                                        self.container.mascotState.setState(.done, message: "Saved text (Vision failed) ⚠️")
                                     }
                                 }
                             }
                         } else {
                             self.saveVisionContent(parsedContent.fullText)
-                            self.clippyController.setState(.done, message: "Saved \(parsedContent.fullText.count) chars! ✅")
+                            self.container.mascotState.setState(.done, message: "Saved \(parsedContent.fullText.count) chars! ✅")
                         }
                     } else {
-                        self.clippyController.setState(.error, message: "No text found 👀")
+                        self.container.mascotState.setState(.error, message: "No text found 👀")
                     }
                 case .failure(let error):
                     Logger.ui.error("Vision parsing failed: \(error.localizedDescription, privacy: .public)")
 
                     // Check if it's a permission error
                     if case VisionParserError.screenCaptureFailed = error {
-                        self.clippyController.setState(.error, message: "Need Screen Recording permission 🔐")
+                        self.container.mascotState.setState(.error, message: "Need Screen Recording permission 🔐")
                         // Open System Settings
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
@@ -262,7 +260,7 @@ struct ContentView: View {
                             }
                         }
                     } else {
-                        self.clippyController.setState(.error, message: "Vision failed: \(error.localizedDescription)")
+                        self.container.mascotState.setState(.error, message: "Vision failed: \(error.localizedDescription)")
                     }
                 }
 
@@ -309,7 +307,7 @@ struct ContentView: View {
         if activeInputMode == .textCapture {
             // Second press: Stop capturing and start thinking
             if textCaptureService.isCapturing {
-                clippyController.setState(.thinking)
+                container.mascotState.setState(.thinking)
                 thinkingStartTime = Date() // Record when thinking started
                 textCaptureService.stopCapturing()
                 // Processing happens in onComplete callback
@@ -322,11 +320,11 @@ struct ContentView: View {
             resetInputState()
             activeInputMode = .textCapture
             
-            clippyController.setState(.idle)
+            container.mascotState.setState(.idle)
             textCaptureService.startCapturing(
                 onTypingDetected: {
                     // Switch to writing state when user starts typing
-                    self.clippyController.setState(.writing)
+                    self.container.mascotState.setState(.writing)
                 },
                 onComplete: { capturedText in
                     self.processCapturedText(capturedText)
@@ -342,7 +340,7 @@ struct ContentView: View {
         if thinkingStartTime == nil {
             thinkingStartTime = Date()
         }
-        clippyController.setState(.thinking)
+        container.mascotState.setState(.thinking)
 
         Task {
             let result = await container.queryOrchestrator.processQuery(
@@ -352,7 +350,7 @@ struct ContentView: View {
                 appName: clipboardMonitor.currentAppName,
                 onStreamingToken: { fullAnswer in
                     let preview = fullAnswer.suffix(50).replacingOccurrences(of: "\n", with: " ")
-                    self.clippyController.setState(.writing, message: "...\(preview)")
+                    self.container.mascotState.setState(.writing, message: "...\(preview)")
                 }
             )
 
@@ -380,17 +378,17 @@ struct ContentView: View {
             
             // Check if there was an error
             if let errorMessage = errorMessage {
-                self.clippyController.setState(.error, message: "❌ \(errorMessage)")
+                self.container.mascotState.setState(.error, message: "❌ \(errorMessage)")
                 self.container.mascotState.onAIError()
                 // Auto-hide after showing error
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                    self.clippyController.hide()
+                    self.container.mascotState.dismissMessage()
                 }
                 return
             }
             
             // Transition to done state
-            self.clippyController.setState(.done)
+            self.container.mascotState.setState(.done)
             
             if let imageIndex = imageIndex, imageIndex > 0, imageIndex <= contextItems.count {
                 let item = contextItems[imageIndex - 1]
@@ -409,28 +407,28 @@ struct ContentView: View {
                     
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         self.simulatePaste()
-                        self.clippyController.setState(.done, message: "Image pasted! 🖼️")
+                        self.container.mascotState.setState(.done, message: "Image pasted! 🖼️")
                     }
                 } else {
-                    self.clippyController.setState(.idle, message: "That's not an image 🤔")
+                    self.container.mascotState.setState(.idle, message: "That's not an image 🤔")
                 }
             } else if let answer = answer?.trimmingCharacters(in: .whitespacesAndNewlines), !answer.isEmpty {
                 // Handle based on input mode
                 if self.activeInputMode == .textCapture {
                     // For text capture: replace captured text with answer
                     self.textCaptureService.replaceCapturedTextWithAnswer(answer)
-                    self.clippyController.setState(.done, message: "Answer ready! 🎉")
+                    self.container.mascotState.setState(.done, message: "Answer ready! 🎉")
                 } else if self.activeInputMode == .voiceCapture {
                     // For voice: insert answer at current cursor position
                     self.textCaptureService.insertTextAtCursor(answer)
-                    self.clippyController.setState(.done, message: "Answer ready! 🎉")
+                    self.container.mascotState.setState(.done, message: "Answer ready! 🎉")
                 } else {
                     // Fallback: insert at cursor
                     self.textCaptureService.insertTextAtCursor(answer)
-                    self.clippyController.setState(.done, message: "Answer ready! 🎉")
+                    self.container.mascotState.setState(.done, message: "Answer ready! 🎉")
                 }
             } else {
-                self.clippyController.setState(.idle, message: "Question not relevant to clipboard 📋")
+                self.container.mascotState.setState(.idle, message: "Question not relevant to clipboard 📋")
             }
             
             // Reset input mode after processing
@@ -450,7 +448,7 @@ struct ContentView: View {
             // Second press: Stop Recording & Process
             if isRecordingVoice {
                 isRecordingVoice = false
-                clippyController.setState(.thinking) // Dog looks like it's thinking
+                container.mascotState.setState(.thinking) // Dog looks like it's thinking
                 
                 guard let url = audioRecorder.stopRecording() else { 
                     resetInputState()
@@ -458,7 +456,7 @@ struct ContentView: View {
                 }
                 
                 guard let service = elevenLabsService else {
-                    clippyController.setState(.error, message: "ElevenLabs API Key missing! 🔑")
+                    container.mascotState.setState(.error, message: "ElevenLabs API Key missing! 🔑")
                     // Don't reset state immediately so user sees message
                     return
                 }
@@ -473,14 +471,14 @@ struct ContentView: View {
                             if !text.isEmpty {
                                 self.processCapturedText(text)
                             } else {
-                                self.clippyController.setState(.idle, message: "I didn't catch that 👂")
+                                self.container.mascotState.setState(.idle, message: "I didn't catch that 👂")
                                 self.activeInputMode = .none
                             }
                         }
                     } catch {
                         await MainActor.run {
                             Logger.ui.error("Voice error: \(error.localizedDescription, privacy: .public)")
-                            self.clippyController.setState(.error, message: "Couldn't hear you 🙉")
+                            self.container.mascotState.setState(.error, message: "Couldn't hear you 🙉")
                             self.activeInputMode = .none
                         }
                     }
@@ -495,7 +493,7 @@ struct ContentView: View {
             
             // Check if service is available before starting
             if elevenLabsService == nil {
-                clippyController.setState(.idle, message: "Set ElevenLabs API Key in Settings ⚙️")
+                container.mascotState.setState(.idle, message: "Set ElevenLabs API Key in Settings ⚙️")
                 // Reset mode after delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     if self.activeInputMode == .voiceCapture {
@@ -507,7 +505,7 @@ struct ContentView: View {
             
             isRecordingVoice = true
             _ = audioRecorder.startRecording()
-            clippyController.setState(.idle, message: "Listening... 🎙️")
+            container.mascotState.setState(.idle, message: "Listening... 🎙️")
             container.mascotState.onVoiceRecording(active: true)
         }
     }
